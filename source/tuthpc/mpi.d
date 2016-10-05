@@ -146,7 +146,7 @@ final class MPITaskSchedular
     }
 
 
-    void runOnMPITaskSchedular(alias func, R)(R argsList)
+    void run(alias func, R)(R argsList)
     {
         if(env.isMaster){
             auto ctrl = runMasterProcess(argsList);
