@@ -11,7 +11,10 @@ version(TUTHPC_USE_MPI)
 {
     shared static this()
     {
-        MPI_Init(&(core.runtime.CArgs.argc), &(core.runtime.CArgs.argv)).checkMPIError();
+        import std.stdio;
+        writeln("UseMPI");
+        import core.runtime;
+        MPI_Init(&(Runtime.cArgs.argc), &(Runtime.cArgs.argv)).checkMPIError();
     }
 
 
@@ -19,6 +22,12 @@ version(TUTHPC_USE_MPI)
     {
         MPI_Finalize();
     }
+}
+
+
+void checkMPIError(int error, string file = __FILE__, size_t line = __LINE__)
+{
+    enforce(error == 0, "MPI Error", file, line);
 }
 
 
@@ -151,10 +160,10 @@ final class MPICommunicator
 
 final class MPIEnvironment
 {
+    private
     this()
     {
-        MPI_Comm_rank(MPI_COMM_WORLD, &_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &_totalProcess);
+        enforce(_instance is null);
     }
 
 
@@ -166,9 +175,24 @@ final class MPIEnvironment
     int totalProcess() const @property { return _totalProcess; }
 
 
+    MPIEnvironment instance() @property
+    {
+        if(_instance is null){
+            _instance = new MPIEnvironment;
+            MPI_Comm_rank(MPI_COMM_WORLD, &(_instance._rank));
+            MPI_Comm_size(MPI_COMM_WORLD, &(_instance._totalProcess));
+        }
+
+        return _instance;
+    }
+
+
   private:
     int _rank;
     int _totalProcess;
+
+  static:
+    MPIEnvironment _instance;
 }
 
 

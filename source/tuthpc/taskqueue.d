@@ -6,7 +6,7 @@ import tuthpc.constant;
 import std.range;
 
 
-void makeQueueScript(R)(ref R orange, Cluster cluster, string[][] prescripts, string binName, string[][] postscripts,uint nodes, uint ppn = 0)
+void makeQueueScriptForMPI(R)(ref R orange, Cluster cluster, string[][] prescripts, string binName, string[][] postscripts,uint nodes, uint ppn = 0)
 {
     immutable info = clusters[cluster];
 
@@ -44,8 +44,10 @@ void makeQueueScriptHeaderForOpenMPI(R)(ref R orange, Cluster cluster, uint node
     .put(orange, "#!/bin/sh\n");
     orange.formattedWrite("#PBS -l nodes=%s:ppn=%s\n", nodes, ppn);
     orange.formattedWrite("#PBS -q %s\n", clusters[cluster].queueName);
-    .put(orange, "#MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
+    .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
     .put(orange, "cd $PBS_O_WORKDIR\n");
+    .put(orange, "module unload intelmpi.intel\n");
+    .put(orange, "module load openmpi.intel\n");
 }
 
 
@@ -67,7 +69,7 @@ void jobRun(uint nodes, uint ppn, void delegate() dg,
 
         auto cluster = loginCluster();
 
-        makeQueueScript(app, cluster,
+        makeQueueScriptForMPI(app, cluster,
                         [["JOB_ENV_TUTHPC_FILE = %s".format(file)],
                          ["JOB_ENV_TUTHPC_LINE = %s".format(line)]],
                         name, [], nodes, ppn);
@@ -88,14 +90,14 @@ void jobRun(uint nodes, uint ppn, void delegate() dg,
     }
 }
 
-unittest 
-{
-    import std.stdio;
-    auto app = appender!string();
-    makeQueueScript(app, Cluster.wdev,
-            [["aaaaa", "bbbbb"], ["cccc", "ddddd"]],
-            "bash",
-            [["aaaaa", "bbbbb"], ["cccc", "ddddd"]],
-            20, 0);
-    writeln(app.data);
-}
+//unittest 
+//{
+//    import std.stdio;
+//    auto app = appender!string();
+//    makeQueueScriptForMPI(app, Cluster.wdev,
+//            [["aaaaa", "bbbbb"], ["cccc", "ddddd"]],
+//            "bash",
+//            [["aaaaa", "bbbbb"], ["cccc", "ddddd"]],
+//            20, 0);
+//    writeln(app.data);
+//}

@@ -22,8 +22,8 @@ shared static this()
 {
 	clusters =  [
 		Cluster.cdev:
-			ClusterInfo("cdev", 30, 16, "cdev", "rsch"),
+			ClusterInfo("cdev", 30, 16, "cdev", "rchq"),
 		Cluster.wdev:
-			ClusterInfo("wdev", 30, 20, "wdev", "wLrsch"),
+			ClusterInfo("wdev", 30, 20, "wdev", "wLrchq"),
 	];
 }

@@ -1,14 +1,24 @@
 {
-	"name": "tuthpc",
-	"authors": [
-		"Kazuki Komatsu"
-	],
-	"description": "MPI client for TUT-HPC..",
-	"copyright": "Copyright © 2016, Kazuki Komatsu",
-	"license": "NYSL",
+    "name": "tuthpc",
+    "authors": [
+        "Kazuki Komatsu"
+    ],
+    "description": "MPI client for TUT-HPC..",
+    "copyright": "Copyright © 2016, Kazuki Komatsu",
+    "license": "NYSL",
 
     "dependencies": {
         "mpi": {"path": "../OpenMPI" },
         "msgpack-d": "~>1.0.0-beta.2"
-    }
+    },
+
+    "configurations": [
+        {
+            "name": "default"
+        },
+        {
+            "name": "mpi",
+            "versions": ["TUTHPC_USE_MPI"]
+        }
+    ]
 }
