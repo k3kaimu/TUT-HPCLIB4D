@@ -8,6 +8,7 @@
 	"license": "NYSL",
 
     "dependencies": {
-        "mpi": {"path": "../OpenMPI" }
+        "mpi": {"path": "../OpenMPI" },
+        "msgpack-d": "~>1.0.0-beta.2"
     }
 }

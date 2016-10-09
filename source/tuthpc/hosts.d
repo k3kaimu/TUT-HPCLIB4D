@@ -1,32 +1,58 @@
-module tuthpc;
+module tuthpc.hosts;
 
+import tuthpc.constant;
+
+import std.algorithm;
+import std.functional;
 
 immutable clusterDevelopmentHosts = ["cdev", "wdev"];
 
 
 private
-bool nowRunningOnClusterDevelopmentHostsImpl(string myHost) pure nothrow @safe
+bool nowRunningOnClusterDevelopmentHostImpl(string myHost) pure nothrow @safe
 {
-    return clusterDevelopmentHosts.canFind!startsWith(myHost);
+    return clusterDevelopmentHosts.canFind!(reverseArgs!startsWith)(myHost);
 }
 
 unittest
 {
-    assert(nowRunningOnClusterDevelopmentHostsImpl("cdev"));
-    assert(nowRunningOnClusterDevelopmentHostsImpl("wdev"));
-    assert(nowRunningOnClusterDevelopmentHostsImpl("cdev1"));
-    assert(nowRunningOnClusterDevelopmentHostsImpl("wdev0"));
+    assert(nowRunningOnClusterDevelopmentHostImpl("cdev"));
+    assert(nowRunningOnClusterDevelopmentHostImpl("wdev"));
+    assert(nowRunningOnClusterDevelopmentHostImpl("cdev1"));
+    assert(nowRunningOnClusterDevelopmentHostImpl("wdev0"));
 
-    assert(!nowRunningOnClusterDevelopmentHostsImpl("csnd"));
-    assert(!nowRunningOnClusterDevelopmentHostsImpl("wsnd"));
-    assert(!nowRunningOnClusterDevelopmentHostsImpl("csnd1"));
-    assert(!nowRunningOnClusterDevelopmentHostsImpl("wsnd0"));
+    assert(!nowRunningOnClusterDevelopmentHostImpl("csnd"));
+    assert(!nowRunningOnClusterDevelopmentHostImpl("wsnd"));
+    assert(!nowRunningOnClusterDevelopmentHostImpl("csnd1"));
+    assert(!nowRunningOnClusterDevelopmentHostImpl("wsnd0"));
 }
 
 
-bool nowRunningOnClusterDevelopmentHosts()
+bool nowRunningOnClusterDevelopmentHost()
 {
-    import std.socket : hostName;
+    import std.socket : Socket;
 
-    return nowRunningOnClusterDevelopmentHostsImpl(hostName());
+    return nowRunningOnClusterDevelopmentHostImpl(Socket.hostName());
+}
+
+
+bool nowRunningOnCDev()
+{
+    return nowRunningOnClusterDevelopmentHostImpl("cdev");
+}
+
+
+bool nowRunningOnWDev()
+{
+    return nowRunningOnClusterDevelopmentHostImpl("wdev");
+}
+
+
+Cluster loginCluster()
+in{
+    assert(nowRunningOnClusterDevelopmentHost);
+}
+body{
+    if(nowRunningOnCDev) return Cluster.cdev;
+    else return Cluster.wdev;
 }

@@ -1,6 +1,11 @@
 module tuthpc.mpi;
 
 import mpi;
+import msgpack;
+import std.exception;
+import std.stdio;
+import std.algorithm;
+import std.range;
 
 version(TUTHPC_USE_MPI)
 {
@@ -38,46 +43,79 @@ struct MPIMessage(T)
 }
 
 
+//interface IMPICommunicator
+//{
+//    void barrier();
+//    void sendTo(int nodeId, int tag, MPIMessageHeader header, MPIMessagePayload payload);
+//    void recvFrom(int nodeId, int tag, MPIMessageHeader* header, MPIMessagePayload* payload);
+//}
+
+
+//struct MPICommunicator(Impl)
+//{
+//    Impl instance;
+//    alias instance this;
+//}
+
+
+//class MPICommunicatorImpl : IMPICommunicator
+//{
+
+//}
+
+
 final class MPICommunicator
 {
+    import std.exception : enforce;
+
     this(MPIEnvironment env)
     {
         _env = env;
     }
 
 
+    void barrier()
+    {
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+
     void sendTo(T)(int nodeId, T data)
     {
         MPIMessageHeader header;
-        MPIPayload payload;
+        MPIMessagePayload payload;
         auto bytes = msgpack.pack(data);
         payload.data = bytes;
         payload.typename = T.stringof;
 
-        auto pyloadBytes = msgpack.pack(payload);
+        auto payloadBytes = msgpack.pack(payload);
         header.rank = _env.rank;
         header.payloadLength = payloadBytes.length;
 
-        MPI_Send(&header, MPIMessageHeader.sizeof, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD);
-        MPI_Send(pyloadBytes.ptr, bytes.length, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD);
+        enforce(MPIMessageHeader.sizeof < int.max);
+        enforce(bytes.length < int.max);
+
+        MPI_Send(&header, cast(int)MPIMessageHeader.sizeof, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD);
+        MPI_Send(payloadBytes.ptr, cast(int)bytes.length, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD);
     }
 
 
-    bool recvFrom(T)(ptrdiff_t nodeId, MPIMessage!T* dst = null)
+    bool recvFrom(T)(int nodeId, MPIMessage!T* dst = null)
     {
         if(_received is null){
             MPIMessageHeader header;
             MPI_Status istatus;
-            MPI_Recv(&header, MPIMessageHeader.sizeof, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD, &istatus);
+            MPI_Recv(&header, cast(int)MPIMessageHeader.sizeof, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD, &istatus);
 
-            ubyte[] buf = new ubyte[header.dataLength];
-            MPI_Recv(buf.ptr, header.payloadLength, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD, &istatus);
+            ubyte[] buf = new ubyte[header.payloadLength];
+            enforce(header.payloadLength < int.max);
+            MPI_Recv(buf.ptr, cast(int)header.payloadLength, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD, &istatus);
             MPIMessagePayload payload = msgpack.unpack!MPIMessagePayload(buf);
 
             _received = new MPIMessageVariant(header.rank, payload.typename, payload.data);
         }
 
-        if(_received.typename == T.stringof && (nodeId == MPI_SOURCE_ANY || _received.rank == nodeId)){
+        if(_received.typename == T.stringof && (nodeId == MPI_ANY_SOURCE || _received.rank == nodeId)){
             if(dst !is null){
                 dst.rank = _received.rank;
                 dst.data = msgpack.unpack!T(_received.data);
@@ -93,7 +131,8 @@ final class MPICommunicator
 
     T recvFromAny(T)(MPIMessage!T* dst = null)
     {
-        return recvFrom!T(MPI_SOURCE_ANY, dst);
+        recvFrom!T(MPI_ANY_SOURCE, dst);
+        return dst.data;
     }
 
 
@@ -135,6 +174,10 @@ final class MPIEnvironment
 
 final class MPITaskSchedular
 {
+    import std.exception : enforce;
+    import std.algorithm : any, all;
+    import std.range;
+
     this(MPIEnvironment env)
     {
         _env = env;
@@ -146,21 +189,63 @@ final class MPITaskSchedular
     }
 
 
-    void run(alias func, R)(R argsList)
+    MPIEnvironment environment() @property { return _env; }
+
+
+    void syncAllProcess()
     {
-        if(env.isMaster){
+        _comm.barrier();
+    }
+
+
+    void runOnlyMaster(void delegate() dg)
+    {
+        if(_env.isMaster){
+            dg();
+        }
+    }
+
+
+    void runOnlyMasterWithSync(void delegate() dg)
+    {
+        syncAllProcess();
+        runOnlyMaster(dg);
+        syncAllProcess();
+    }
+
+
+    void run(alias func, R, DArgs...)(lazy R argsList, DArgs defaultArgs)
+    {
+        if(_env.isMaster){
             auto ctrl = runMasterProcess(argsList);
             if(ctrl == ControlData.terminated)
                 throw new Exception("Terminated Master Process");
         }
         else{
-            auto ctrl = runWorkerProcess!(func, ElementType!R)();
+            auto ctrl = runWorkerProcess!(func, ElementType!R)(defaultArgs);
             if(ctrl == ControlData.terminated)
-                throw new Exception("")
+                throw new Exception("");
         }
     }
 
 
+    void run(MultiTaskList taskList)
+    {
+        import std.range : iota;
+
+        static void runTask(size_t i, MultiTaskList list) { list[i](); }
+
+        run!runTask(iota(taskList.length), taskList);
+    }
+
+
+    void run(void delegate()[] taskList)
+    {
+        run(new MultiTaskList(taskList));
+    }
+
+
+    private
     ControlData runMasterProcess(R)(R argsList)
     {
         scope(failure)
@@ -188,26 +273,26 @@ final class MPITaskSchedular
             enforce(_comm.recvFromAny(&info), "Unknown received data");
 
             if(info.data == Notification.done || info.data == Notification.failure)
-                _workers[ctrl.rank] = WorkerStatus.waiting;
+                _workers[info.rank] = WorkerStatus.waiting;
             else if(info.data == Notification.terminated){
-                _workers[ctrl.rank] = WorkerStatus.terminated;
-                if(_workers.byValues.all!(a => a == WorkerStatus.terminated))
+                _workers[info.rank] = WorkerStatus.terminated;
+                if(_workers.byValue.all!(a => a == WorkerStatus.terminated))
                     return ControlData.terminated;
             }else
                 throw new Exception("Unknown received data");
 
-            if(_workers[ctrl.rank] == WorkerStatus.waiting)
-                sendNextTask(ctrl.rank);
+            if(_workers[info.rank] == WorkerStatus.waiting)
+                sendNextTask(info.rank);
         }
 
-        while(_workers.byValues.any!(a => a == WorkerStatus.running)){
+        while(_workers.byValue.any!(a => a == WorkerStatus.running)){
             MPIMessage!Notification info;
             enforce(_comm.recvFromAny(&info), "Unknown received data");
 
             if(info.data == Notification.done || info.data == Notification.failure)
-                _workers[ctrl.rank] = WorkerStatus.waiting;
+                _workers[info.rank] = WorkerStatus.waiting;
             else if(info.data == Notification.terminated)
-                _workers[ctrl.rank] = WorkerStatus.terminated;
+                _workers[info.rank] = WorkerStatus.terminated;
             else
                 throw new Exception("Unknown received data");
         }
@@ -220,7 +305,8 @@ final class MPITaskSchedular
     }
 
 
-    ControlData runWorkerProcess(alias func, E)()
+    private
+    ControlData runWorkerProcess(alias func, E, Args...)(Args args)
     {
         scope(failure)
         {
@@ -229,12 +315,12 @@ final class MPITaskSchedular
 
         while(1){
             if(_comm.recvFrom!E(0)){
-                MPIMessage!E args;
-                _comm.recvFromAny!E(&args);
+                MPIMessage!E msg;
+                _comm.recvFromAny!E(&msg);
 
                 Object obj;
                 try
-                    func(args.data);
+                    func(msg.data, args);
                 catch(Exception ex){
                     writeln(ex);
                     obj = ex;
@@ -251,7 +337,7 @@ final class MPITaskSchedular
             }
             else if(_comm.recvFrom!ControlData(0)){
                 MPIMessage!ControlData ctrl;
-                _comm.recvFrom!(0, &ctrl);
+                _comm.recvFrom(0, &ctrl);
                 return ctrl.data;
             }
             else{
@@ -289,4 +375,30 @@ final class MPITaskSchedular
         failure = -1,
         done = 0
     }
+}
+
+
+
+final class MultiTaskList
+{
+    this() {}
+    this(void delegate()[] list) { _tasks = list; }
+
+    void append(F, T...)(F func, T args)
+    {
+        _tasks ~= delegate() { func(args); };
+    }
+
+
+    void delegate() opIndex(size_t idx)
+    {
+        return _tasks[idx];
+    }
+
+
+    size_t length() const @property { return _tasks.length; }
+
+
+  private:
+    void delegate()[] _tasks;
 }
