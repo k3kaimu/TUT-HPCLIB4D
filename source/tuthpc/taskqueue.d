@@ -4,9 +4,10 @@ import tuthpc.hosts;
 import tuthpc.constant;
 
 import std.range;
+import std.format;
 
 
-void makeQueueScriptForMPI(R)(ref R orange, Cluster cluster, string[][] prescripts, string binName, string[][] postscripts,uint nodes, uint ppn = 0)
+void makeQueueScriptForMPI(R)(ref R orange, Cluster cluster, string[string] envs, string[][] prescripts, string binName, string[][] postscripts,uint nodes, uint ppn = 0)
 {
     immutable info = clusters[cluster];
 
@@ -25,7 +26,13 @@ void makeQueueScriptForMPI(R)(ref R orange, Cluster cluster, string[][] prescrip
 
         .put(orange, '\n');
     }
-    .put(orange, ["mpirun -np $MPI_PROCS ", binName, "\n"]);
+
+    string envXs;
+    foreach(k, v; envs)
+        envXs ~= format("-x %s=%s ", k, v);
+
+
+    .put(orange, ["mpirun ", envXs, " -np $MPI_PROCS ", binName, "\n"]);
     foreach(i, es; postscripts){
         foreach(e; es){
             .put(orange, es);
@@ -64,15 +71,15 @@ void jobRun(uint nodes, uint ppn, void delegate() dg,
     import std.conv : to;
 
     if(nowRunningOnClusterDevelopmentHost()){
-        immutable name = Runtime.args[0];
+        immutable name = format("%s %s %s", Runtime.args[0], file, line);
         auto app = appender!string;
 
         auto cluster = loginCluster();
 
         makeQueueScriptForMPI(app, cluster,
-                        [["JOB_ENV_TUTHPC_FILE = %s".format(file)],
-                         ["JOB_ENV_TUTHPC_LINE = %s".format(line)]],
-                        name, [], nodes, ppn);
+                            ["JOB_ENV_TUTHPC_FILE": file,
+                             "JOB_ENV_TUTHPC_LINE": line.to!string],
+                            [], name, [], nodes, ppn);
 
         import std.file;
         std.file.write("pushToQueue.sh", app.data);

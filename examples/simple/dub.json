@@ -1,0 +1,22 @@
+{
+    "name": "simple",
+    "authors": [
+        "Komatsu Kazuki"
+    ],
+    "description": "A minimal D application.",
+    "copyright": "Copyright © 2016, Komatsu Kazuki",
+    "license": "proprietary",
+    "dependencies": {
+        "tuthpc": { "path": "../.." }
+    },
+    "targetType": "executable",
+    "configurations": [
+        { "name": "default" },
+        {
+            "name": "mpi",
+            "subConfigurations" :{
+                "tuthpc": "mpi"
+            }
+        }
+    ]
+}

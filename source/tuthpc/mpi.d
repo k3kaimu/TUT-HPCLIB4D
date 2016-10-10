@@ -1,5 +1,7 @@
 module tuthpc.mpi;
 
+import tuthpc.hosts;
+
 import mpi;
 import msgpack;
 import std.exception;
@@ -11,16 +13,19 @@ version(TUTHPC_USE_MPI)
 {
     shared static this()
     {
-        import std.stdio;
-        writeln("UseMPI");
-        import core.runtime;
-        MPI_Init(&(Runtime.cArgs.argc), &(Runtime.cArgs.argv)).checkMPIError();
+        if(!nowRunningOnClusterDevelopmentHost){
+            import std.stdio;
+            import core.runtime;
+            MPI_Init(&(Runtime.cArgs.argc), &(Runtime.cArgs.argv)).checkMPIError();
+        }
     }
 
 
     shared static ~this()
     {
-        MPI_Finalize();
+        if(!nowRunningOnClusterDevelopmentHost){
+            MPI_Finalize();
+        }
     }
 }
 
@@ -85,12 +90,16 @@ final class MPICommunicator
 
     void barrier()
     {
-        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD).checkMPIError();
     }
+
+
+    //T[] gather(T)(T value)
 
 
     void sendTo(T)(int nodeId, T data)
     {
+        //writefln("[%s/%s] Send Data %s", _env.rank, _env.totalProcess, data);
         MPIMessageHeader header;
         MPIMessagePayload payload;
         auto bytes = msgpack.pack(data);
@@ -104,23 +113,29 @@ final class MPICommunicator
         enforce(MPIMessageHeader.sizeof < int.max);
         enforce(bytes.length < int.max);
 
-        MPI_Send(&header, cast(int)MPIMessageHeader.sizeof, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD);
-        MPI_Send(payloadBytes.ptr, cast(int)bytes.length, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD);
+        MPI_Send(&header, cast(int)MPIMessageHeader.sizeof, MPI_BYTE, nodeId, 1, MPI_COMM_WORLD).checkMPIError();
+        MPI_Send(payloadBytes.ptr, cast(int)payloadBytes.length, MPI_BYTE, nodeId, 2, MPI_COMM_WORLD).checkMPIError();
     }
 
 
     bool recvFrom(T)(int nodeId, MPIMessage!T* dst = null)
     {
         if(_received is null){
-            MPIMessageHeader header;
+            MPIMessageHeader header; header.rank = -1;
             MPI_Status istatus;
-            MPI_Recv(&header, cast(int)MPIMessageHeader.sizeof, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD, &istatus);
+            MPI_Recv(&header, cast(int)MPIMessageHeader.sizeof, MPI_BYTE, nodeId, 1, MPI_COMM_WORLD, &istatus).checkMPIError();
+            //writefln("[%s/%s] Receive Header %s", _env.rank, _env.totalProcess, header);
 
             ubyte[] buf = new ubyte[header.payloadLength];
             enforce(header.payloadLength < int.max);
-            MPI_Recv(buf.ptr, cast(int)header.payloadLength, MPI_CHAR, nodeId, 0, MPI_COMM_WORLD, &istatus);
-            MPIMessagePayload payload = msgpack.unpack!MPIMessagePayload(buf);
 
+            if(nodeId == MPI_ANY_SOURCE)
+                nodeId = header.rank;
+
+            MPI_Recv(buf.ptr, cast(int)header.payloadLength, MPI_BYTE, nodeId, 2, MPI_COMM_WORLD, &istatus).checkMPIError();
+            //writefln("[%s/%s] Buffer %s", _env.rank, _env.totalProcess, buf);
+            MPIMessagePayload payload = msgpack.unpack!MPIMessagePayload(buf);
+            //writefln("[%s/%s] Receive Payload %s", _env.rank, _env.totalProcess, payload);
             _received = new MPIMessageVariant(header.rank, payload.typename, payload.data);
         }
 
@@ -128,6 +143,7 @@ final class MPICommunicator
             if(dst !is null){
                 dst.rank = _received.rank;
                 dst.data = msgpack.unpack!T(_received.data);
+                //writefln("[%s/%s] Receive %s", _env.rank, _env.totalProcess, dst.data);
 
                 _received = null;
             }
@@ -138,10 +154,9 @@ final class MPICommunicator
     }
 
 
-    T recvFromAny(T)(MPIMessage!T* dst = null)
+    bool recvFromAny(T)(MPIMessage!T* dst = null)
     {
-        recvFrom!T(MPI_ANY_SOURCE, dst);
-        return dst.data;
+        return recvFrom!T(MPI_ANY_SOURCE, dst);
     }
 
 
@@ -175,12 +190,16 @@ final class MPIEnvironment
     int totalProcess() const @property { return _totalProcess; }
 
 
+    static
     MPIEnvironment instance() @property
     {
         if(_instance is null){
             _instance = new MPIEnvironment;
             MPI_Comm_rank(MPI_COMM_WORLD, &(_instance._rank));
             MPI_Comm_size(MPI_COMM_WORLD, &(_instance._totalProcess));
+
+            import std.stdio, std.socket;
+            //writefln("Init: [%s/%s] %s", _instance._rank, _instance._totalProcess, Socket.hostName);
         }
 
         return _instance;
@@ -196,24 +215,26 @@ final class MPIEnvironment
 }
 
 
-final class MPITaskSchedular
+final class MPITaskScheduler
 {
     import std.exception : enforce;
     import std.algorithm : any, all;
     import std.range;
 
-    this(MPIEnvironment env)
+
+    this()
     {
-        _env = env;
-        _comm = new MPICommunicator(env);
+        _env = MPIEnvironment.instance;
+        _comm = new MPICommunicator(_env);
 
         if(_env.isMaster)
-            foreach(i; 1 .. env.totalProcess)
+            foreach(i; 1 .. _env.totalProcess)
                 _workers[i] = WorkerStatus.waiting;
     }
 
 
     MPIEnvironment environment() @property { return _env; }
+    MPICommunicator communicator() @property { return _comm; }
 
 
     void syncAllProcess()
@@ -238,34 +259,22 @@ final class MPITaskSchedular
     }
 
 
-    void run(alias func, R, DArgs...)(lazy R argsList, DArgs defaultArgs)
+    void runImpl(alias func, R, DArgs...)(lazy R argsList, DArgs defaultArgs)
     {
+        _comm.barrier();
         if(_env.isMaster){
+            //writefln("[%s/%s] Is Master", _env.rank, _env.totalProcess);
             auto ctrl = runMasterProcess(argsList);
             if(ctrl == ControlData.terminated)
                 throw new Exception("Terminated Master Process");
         }
         else{
+            //writefln("[%s/%s] Is Worker", _env.rank, _env.totalProcess);
             auto ctrl = runWorkerProcess!(func, ElementType!R)(defaultArgs);
             if(ctrl == ControlData.terminated)
                 throw new Exception("");
         }
-    }
-
-
-    void run(MultiTaskList taskList)
-    {
-        import std.range : iota;
-
-        static void runTask(size_t i, MultiTaskList list) { list[i](); }
-
-        run!runTask(iota(taskList.length), taskList);
-    }
-
-
-    void run(void delegate()[] taskList)
-    {
-        run(new MultiTaskList(taskList));
+        _comm.barrier();
     }
 
 
@@ -280,6 +289,7 @@ final class MPITaskSchedular
 
         void sendNextTask(int target)
         {
+            //writefln("[%s/%s] Send Next Task To %s", _env.rank, _env.totalProcess, target);
             _comm.sendTo(target, argsList.front);
             _workers[target] = WorkerStatus.running;
             argsList.popFront();
@@ -295,6 +305,7 @@ final class MPITaskSchedular
         {
             MPIMessage!Notification info;
             enforce(_comm.recvFromAny(&info), "Unknown received data");
+            //writefln("[%s/%s] Receive Notification %s", _env.rank, _env.totalProcess, info);
 
             if(info.data == Notification.done || info.data == Notification.failure)
                 _workers[info.rank] = WorkerStatus.waiting;
@@ -309,9 +320,12 @@ final class MPITaskSchedular
                 sendNextTask(info.rank);
         }
 
+        //writefln("[%s/%s] Workers %s, %s", _env.rank, _env.totalProcess, _workers, _workers.byValue.any!(a => a == WorkerStatus.running));
+
         while(_workers.byValue.any!(a => a == WorkerStatus.running)){
             MPIMessage!Notification info;
             enforce(_comm.recvFromAny(&info), "Unknown received data");
+            //writefln("[%s/%s] Receive Notification %s", _env.rank, _env.totalProcess, info);
 
             if(info.data == Notification.done || info.data == Notification.failure)
                 _workers[info.rank] = WorkerStatus.waiting;
@@ -322,8 +336,10 @@ final class MPITaskSchedular
         }
 
 
-        foreach(inode, status; _workers) if(status == WorkerStatus.waiting)
+        foreach(inode, status; _workers) if(status == WorkerStatus.waiting){
             _comm.sendTo(inode, ControlData.doneAllTask);
+            //writefln("[%s/%s] Send to doneAllTask To %s", _env.rank, _env.totalProcess, inode);
+        }
 
         return ControlData.doneAllTask;
     }
@@ -362,6 +378,7 @@ final class MPITaskSchedular
             else if(_comm.recvFrom!ControlData(0)){
                 MPIMessage!ControlData ctrl;
                 _comm.recvFrom(0, &ctrl);
+                //writefln("[%s/%s] receive control data %s", _env.rank, _env.totalProcess, ctrl);
                 return ctrl.data;
             }
             else{
@@ -399,6 +416,31 @@ final class MPITaskSchedular
         failure = -1,
         done = 0
     }
+}
+
+
+void run(alias func, R, Args...)(MPITaskScheduler s, lazy R range, Args args)
+{
+    static
+    void runTask(T...)(T args) { func(args); }
+
+    s.runImpl!runTask(range, args);
+}
+
+
+void run(MPITaskScheduler s, MultiTaskList taskList)
+{
+    import std.range : iota;
+
+    static void runTask(size_t i, MultiTaskList list) { list[i](); }
+
+    s.runImpl!runTask(iota(taskList.length), taskList);
+}
+
+
+void run(MPITaskScheduler s, void delegate()[] taskList)
+{
+    s.run(new MultiTaskList(taskList));
 }
 
 

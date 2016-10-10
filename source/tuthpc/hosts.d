@@ -9,9 +9,9 @@ immutable clusterDevelopmentHosts = ["cdev", "wdev"];
 
 
 private
-bool nowRunningOnClusterDevelopmentHostImpl(string myHost) pure nothrow @safe
+bool nowRunningOnClusterDevelopmentHostImpl(string myHost, in string[] clusters = clusterDevelopmentHosts) pure nothrow @safe
 {
-    return clusterDevelopmentHosts.canFind!(reverseArgs!startsWith)(myHost);
+    return clusters.canFind!(reverseArgs!startsWith)(myHost);
 }
 
 unittest
@@ -28,23 +28,35 @@ unittest
 }
 
 
-bool nowRunningOnClusterDevelopmentHost()
+bool nowRunningOnClusterDevelopmentHost(in string[] clusters = clusterDevelopmentHosts)
 {
     import std.socket : Socket;
 
-    return nowRunningOnClusterDevelopmentHostImpl(Socket.hostName());
+    return nowRunningOnClusterDevelopmentHostImpl(Socket.hostName(), clusters);
 }
 
 
 bool nowRunningOnCDev()
 {
-    return nowRunningOnClusterDevelopmentHostImpl("cdev");
+    return nowRunningOnClusterDevelopmentHost(["cdev"]);
+}
+
+unittest
+{
+    import std.socket;
+    assert(Socket.hostName.startsWith("cdev") == nowRunningOnCDev());
 }
 
 
 bool nowRunningOnWDev()
 {
-    return nowRunningOnClusterDevelopmentHostImpl("wdev");
+    return nowRunningOnClusterDevelopmentHost(["wdev"]);
+}
+
+unittest
+{
+    import std.socket;
+    assert(Socket.hostName.startsWith("wdev") == nowRunningOnWDev());
 }
 
 
@@ -55,4 +67,10 @@ in{
 body{
     if(nowRunningOnCDev) return Cluster.cdev;
     else return Cluster.wdev;
+}
+
+unittest
+{
+    if(nowRunningOnCDev) assert(loginCluster == Cluster.cdev);
+    if(nowRunningOnWDev) assert(loginCluster == Cluster.wdev);
 }
