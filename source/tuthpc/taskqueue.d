@@ -97,6 +97,15 @@ void jobRun(uint nodes, uint ppn, void delegate() dg,
     }
 }
 
+
+void jobRun(alias func)(uint nodes = 1, uint ppn = 0,
+                        string file = __FILE__,
+                        size_t line = __LINE__)
+{
+    jobRun(nodes, ppn, delegate(){ func(); }, file, line);
+}
+
+
 //unittest 
 //{
 //    import std.stdio;

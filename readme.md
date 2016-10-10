@@ -24,7 +24,7 @@ void mainJob1()
 {
     // MPIの使用準備
     auto env = new MPIEnvironment()
-    auto scheduler = MPITaskSchedular(env);
+    auto scheduler = new MPITaskScheduler(env);
 
     // 1000回myTask1を呼び出す
     // Masterノードは，他のWorkerノードに処理を委託する
