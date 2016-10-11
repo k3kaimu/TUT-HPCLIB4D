@@ -48,9 +48,10 @@ void makeQueueScriptHeaderForOpenMPI(R)(ref R orange, Cluster cluster, uint node
 {
     import std.format : formattedWrite;
 
-    .put(orange, "#!/bin/sh\n");
+    .put(orange, "#!/bin/bash\n");
     orange.formattedWrite("#PBS -l nodes=%s:ppn=%s\n", nodes, ppn);
     orange.formattedWrite("#PBS -q %s\n", clusters[cluster].queueName);
+    .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
     .put(orange, "cd $PBS_O_WORKDIR\n");
     .put(orange, "module unload intelmpi.intel\n");
