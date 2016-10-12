@@ -12,6 +12,7 @@ struct ClusterInfo
 	string name;
 	uint maxNode;
 	uint maxPPN;
+	uint maxMem;
 	string devHost;
 	string queueName;
 }
@@ -22,8 +23,8 @@ shared static this()
 {
 	clusters =  [
 		Cluster.cdev:
-			ClusterInfo("cdev", 30, 16, "cdev", "rchq"),
+			ClusterInfo("cdev", 30, 16, 48, "cdev", "rchq"),
 		Cluster.wdev:
-			ClusterInfo("wdev", 30, 20, "wdev", "wLrchq"),
+			ClusterInfo("wdev", 30, 20, 100, "wdev", "wLrchq"),
 	];
 }

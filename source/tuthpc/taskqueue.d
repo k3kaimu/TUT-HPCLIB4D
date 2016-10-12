@@ -48,8 +48,11 @@ void makeQueueScriptHeaderForOpenMPI(R)(ref R orange, Cluster cluster, uint node
 {
     import std.format : formattedWrite;
 
+    immutable maxMem = clusters[cluster].maxMem,
+              maxMemPerPS = maxMem / ppn;
+
     .put(orange, "#!/bin/bash\n");
-    orange.formattedWrite("#PBS -l nodes=%s:ppn=%s\n", nodes, ppn);
+    orange.formattedWrite("#PBS -l nodes=%s:ppn=%s,mem=%sgb,pmem=%sgb,vmem=%sgb,pvmem=%sgb\n", nodes, ppn, maxMem, maxMemPerPS, maxMem, maxMemPerPS);
     orange.formattedWrite("#PBS -q %s\n", clusters[cluster].queueName);
     .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
