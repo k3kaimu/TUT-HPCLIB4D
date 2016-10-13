@@ -62,7 +62,9 @@ void makeQueueScriptHeaderForOpenMPI(R)(ref R orange, Cluster cluster, uint node
 }
 
 
-void jobRun(uint nodes, uint ppn, void delegate() dg,
+void jobRun(T = string)(uint nodes, uint ppn,
+            T id,
+            void delegate() dg,
             string file = __FILE__,
             size_t line = __LINE__)
 {
@@ -75,14 +77,15 @@ void jobRun(uint nodes, uint ppn, void delegate() dg,
     import std.conv : to;
 
     if(nowRunningOnClusterDevelopmentHost()){
-        immutable name = format("%s %s %s", Runtime.args[0], file, line);
+        immutable name = Runtime.args[0];
         auto app = appender!string;
 
         auto cluster = loginCluster();
 
         makeQueueScriptForMPI(app, cluster,
                             ["JOB_ENV_TUTHPC_FILE": file,
-                             "JOB_ENV_TUTHPC_LINE": line.to!string],
+                             "JOB_ENV_TUTHPC_LINE": line.to!string
+                             "JOB_ENV_TUTHPC_ID": is(T == string) ? id : id.to!string],
                             [], name, [], nodes, ppn);
 
         import std.file;
@@ -93,20 +96,41 @@ void jobRun(uint nodes, uint ppn, void delegate() dg,
         writeln("qsub output: ", qsub.output);
     }else{
         auto envs = environment.toAA();
-        enforce("JOB_ENV_TUTHPC_LINE" in envs && "JOB_ENV_TUTHPC_FILE" in envs, "cannot file environments: 'JOB_ENV_TUTHPC_LINE' and 'JOB_ENV_TUTHPC_FILE'");
+        enforce("JOB_ENV_TUTHPC_LINE" in envs
+             && "JOB_ENV_TUTHPC_FILE" in envs
+             && "JOB_ENV_TUTHPC_ID" in envs, "cannot find environment variables: 'JOB_ENV_TUTHPC_LINE', 'JOB_ENV_TUTHPC_FILE', and 'JOB_ENV_TUTHPC_ID'");
 
-        if(envs["JOB_ENV_TUTHPC_FILE"] == file && envs["JOB_ENV_TUTHPC_LINE"].to!size_t == line){
+        if(envs["JOB_ENV_TUTHPC_FILE"] == file
+        && envs["JOB_ENV_TUTHPC_LINE"].to!size_t == line
+        && envs["JOB_ENV_TUTHPC_ID"] == (is(T == string) ? id : id.to!string))
+        {
             dg();
         }
     }
 }
 
 
-void jobRun(alias func)(uint nodes = 1, uint ppn = 0,
+void jobRun(uint nodes, uint ppn,
+            void delegate() dg,
+            string file = __FILE__,
+            size_t line = __LINE__)
+{
+    jobRun(nodes, ppn, "null", dg, file, line);
+}
+
+
+void jobRun(alias func, T = string)(uint nodes = 1, uint ppn = 0,
+                        T id = "none",
                         string file = __FILE__,
                         size_t line = __LINE__)
 {
-    jobRun(nodes, ppn, delegate(){ func(); }, file, line);
+    jobRun(nodes, ppn, id, delegate(){ func(); },  file, line);
+}
+
+
+void jobRun(alias func)(uint nodes = 1, uint ppn = 0, string file == __FILE__, size_t line = __LINE__)
+{
+    jobRun!func(nodes, ppn, "none", file, line);
 }
 
 
