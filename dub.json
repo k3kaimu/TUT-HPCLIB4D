@@ -3,7 +3,7 @@
     "authors": [
         "Kazuki Komatsu"
     ],
-    "description": "MPI client for TUT-HPC..",
+    "description": "A small library for TUT-HPC.",
     "copyright": "Copyright © 2016, Kazuki Komatsu",
     "license": "NYSL",
 
