@@ -36,6 +36,17 @@ bool nowRunningOnClusterDevelopmentHost(in string[] clusters = clusterDevelopmen
 }
 
 
+bool nowRunningOnClusterComputingNode()
+{
+    import std.socket : Socket;
+    foreach(k, v; clusters)
+        if(v.isNode(Socket.hostName()))
+            return true;
+
+    return false;
+}
+
+
 bool nowRunningOnCDev()
 {
     return nowRunningOnClusterDevelopmentHost(["cdev"]);

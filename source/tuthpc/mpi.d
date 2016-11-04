@@ -1,6 +1,7 @@
 module tuthpc.mpi;
 
 import tuthpc.hosts;
+import tuthpc.taskqueue;
 
 import mpi;
 import msgpack;
@@ -8,6 +9,7 @@ import std.exception;
 import std.stdio;
 import std.algorithm;
 import std.range;
+
 
 version(TUTHPC_USE_MPI)
 {
@@ -443,28 +445,3 @@ void run(MPITaskScheduler s, void delegate()[] taskList)
     s.run(new MultiTaskList(taskList));
 }
 
-
-
-final class MultiTaskList
-{
-    this() {}
-    this(void delegate()[] list) { _tasks = list; }
-
-    void append(F, T...)(F func, T args)
-    {
-        _tasks ~= delegate() { func(args); };
-    }
-
-
-    void delegate() opIndex(size_t idx)
-    {
-        return _tasks[idx];
-    }
-
-
-    size_t length() const @property { return _tasks.length; }
-
-
-  private:
-    void delegate()[] _tasks;
-}

@@ -7,6 +7,32 @@ import std.range;
 import std.format;
 
 
+final class MultiTaskList
+{
+    this() {}
+    this(void delegate()[] list) { _tasks = list; }
+
+    void append(F, T...)(F func, T args)
+    {
+        _tasks ~= delegate() { func(args); };
+    }
+
+
+    void delegate() opIndex(size_t idx)
+    {
+        return _tasks[idx];
+    }
+
+
+    size_t length() const @property { return _tasks.length; }
+
+
+  private:
+    void delegate()[] _tasks;
+}
+
+
+
 void makeQueueScriptForMPI(R)(ref R orange, Cluster cluster, string[string] envs, string[][] prescripts, string binName, string[][] postscripts,uint nodes, uint ppn = 0)
 {
     immutable info = clusters[cluster];
@@ -48,7 +74,7 @@ void makeQueueScriptHeaderForOpenMPI(R)(ref R orange, Cluster cluster, uint node
 {
     import std.format : formattedWrite;
 
-    immutable maxMem = clusters[cluster].maxMem,
+    immutable maxMem = clusters[cluster].maxMem / clusters[cluster].maxPPN * ppn,
               maxMemPerPS = maxMem / ppn;
 
     .put(orange, "#!/bin/bash\n");
@@ -84,8 +110,8 @@ void jobRun(T = string)(uint nodes, uint ppn,
 
         makeQueueScriptForMPI(app, cluster,
                             ["JOB_ENV_TUTHPC_FILE": file,
-                             "JOB_ENV_TUTHPC_LINE": line.to!string
-                             "JOB_ENV_TUTHPC_ID": is(T == string) ? id : id.to!string],
+                             "JOB_ENV_TUTHPC_LINE": line.to!string,
+                             "JOB_ENV_TUTHPC_ID": id.to!string],
                             [], name, [], nodes, ppn);
 
         import std.file;
@@ -94,7 +120,7 @@ void jobRun(T = string)(uint nodes, uint ppn,
         auto qsub = execute(["qsub", "pushToQueue.sh"]);
         writeln(qsub.status == 0 ? "Successed push to queue" : "Failed push to queue");
         writeln("qsub output: ", qsub.output);
-    }else{
+    }else if(nowRunningOnClusterComputingNode()){
         auto envs = environment.toAA();
         enforce("JOB_ENV_TUTHPC_LINE" in envs
              && "JOB_ENV_TUTHPC_FILE" in envs
@@ -102,10 +128,13 @@ void jobRun(T = string)(uint nodes, uint ppn,
 
         if(envs["JOB_ENV_TUTHPC_FILE"] == file
         && envs["JOB_ENV_TUTHPC_LINE"].to!size_t == line
-        && envs["JOB_ENV_TUTHPC_ID"] == (is(T == string) ? id : id.to!string))
+        && envs["JOB_ENV_TUTHPC_ID"] == id.to!string)
         {
             dg();
         }
+    }else{
+        // execute serial
+        dg();
     }
 }
 
@@ -128,9 +157,18 @@ void jobRun(alias func, T = string)(uint nodes = 1, uint ppn = 0,
 }
 
 
-void jobRun(alias func)(uint nodes = 1, uint ppn = 0, string file == __FILE__, size_t line = __LINE__)
+void jobRun(alias func)(uint nodes = 1, uint ppn = 0, string file = __FILE__, size_t line = __LINE__)
 {
     jobRun!func(nodes, ppn, "none", file, line);
+}
+
+
+void jobRun(MultiTaskList taskList, uint nodes = 1, uint ppn = 1, string file = __FILE__, size_t line = __LINE__)
+{
+    foreach(i; iota(taskList.length)){
+        import std.stdio;
+        .jobRun(nodes, ppn, i, taskList[i], file, line);
+    }
 }
 
 
