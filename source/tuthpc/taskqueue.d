@@ -165,9 +165,14 @@ void jobRun(alias func)(uint nodes = 1, uint ppn = 0, string file = __FILE__, si
 
 void jobRun(MultiTaskList taskList, uint nodes = 1, uint ppn = 1, string file = __FILE__, size_t line = __LINE__)
 {
-    foreach(i; iota(taskList.length)){
-        import std.stdio;
-        .jobRun(nodes, ppn, i, taskList[i], file, line);
+    if(nowRunningOnClusterDevelopmentHost() || nowRunningOnClusterComputingNode()){
+        foreach(i; iota(taskList.length))
+            .jobRun(nodes, ppn, i, taskList[i], file, line);
+    }else{
+        import std.parallelism;
+
+        foreach(i; iota(taskList.length).parallel)
+            .jobRun(nodes, ppn, i, taskList[i], file, line);
     }
 }
 
