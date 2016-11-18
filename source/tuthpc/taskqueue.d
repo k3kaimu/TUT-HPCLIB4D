@@ -57,8 +57,41 @@ void makeQueueScriptForMPI(R)(ref R orange, Cluster cluster, string[string] envs
     foreach(k, v; envs)
         envXs ~= format("-x %s=%s ", k, v);
 
-
     .put(orange, ["mpirun ", envXs, " -np $MPI_PROCS ", binName, "\n"]);
+    foreach(i, es; postscripts){
+        foreach(e; es){
+            .put(orange, es);
+            .put(orange, " ");
+        }
+
+        .put(orange, '\n');
+    }
+}
+
+
+void makeQueueScriptForArrayJob(R)(ref R orange, Cluster cluster, string[string] envs, string[][] prescripts, string binName, string[][] postscripts, uint ppn, size_t jobCount)
+{
+    immutable info = clusters[cluster];
+
+    if(ppn == 0)
+        ppn = info.maxPPN;
+
+    makeQueueScriptHeaderForArrayJob(orange, cluster, ppn, jobCount);
+    foreach(i, es; prescripts){
+        foreach(e; es){
+            .put(orange, es);
+            .put(orange, " ");
+        }
+
+        .put(orange, '\n');
+    }
+
+    string envXs;
+    foreach(k, v; envs){
+        orange.formattedWrite("export %s=%s\n", k, v);
+    }
+
+    .put(orange, ["./" ~ binName, "\n"]);
     foreach(i, es; postscripts){
         foreach(e; es){
             .put(orange, es);
@@ -82,6 +115,24 @@ void makeQueueScriptHeaderForOpenMPI(R)(ref R orange, Cluster cluster, uint node
     orange.formattedWrite("#PBS -q %s\n", clusters[cluster].queueName);
     .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
+    .put(orange, "cd $PBS_O_WORKDIR\n");
+    .put(orange, "module unload intelmpi.intel\n");
+    .put(orange, "module load openmpi.intel\n");
+}
+
+
+void makeQueueScriptHeaderForArrayJob(R)(ref R orange, Cluster cluster, uint ppn, size_t jobCount)
+{
+    import std.format : formattedWrite;
+
+    immutable maxMem = clusters[cluster].maxMem / clusters[cluster].maxPPN * ppn,
+              maxMemPerPS = maxMem / ppn;
+
+    .put(orange, "#!/bin/bash\n");
+    orange.formattedWrite("#PBS -l nodes=1:ppn=%s\n", ppn);
+    orange.formattedWrite("#PBS -q %s\n", clusters[cluster].queueName);
+    orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
+    .put(orange, "source ~/.bashrc\n");
     .put(orange, "cd $PBS_O_WORKDIR\n");
     .put(orange, "module unload intelmpi.intel\n");
     .put(orange, "module load openmpi.intel\n");
@@ -163,16 +214,53 @@ void jobRun(alias func)(uint nodes = 1, uint ppn = 0, string file = __FILE__, si
 }
 
 
-void jobRun(MultiTaskList taskList, uint nodes = 1, uint ppn = 1, string file = __FILE__, size_t line = __LINE__)
+void jobRun(MultiTaskList taskList, uint ppn = 1, string file = __FILE__, size_t line = __LINE__)
 {
-    if(nowRunningOnClusterDevelopmentHost() || nowRunningOnClusterComputingNode()){
-        foreach(i; iota(taskList.length))
-            .jobRun(nodes, ppn, i, taskList[i], file, line);
+    import core.runtime : Runtime;
+    import std.format : format, formattedWrite;
+    import std.array : appender;
+    import std.process : execute, environment;
+    import std.stdio : writeln;
+    import std.exception : enforce;
+    import std.conv : to;
+
+    if(nowRunningOnClusterDevelopmentHost()){
+        immutable name = Runtime.args[0];
+        auto app = appender!string;
+
+        auto cluster = loginCluster();
+
+        makeQueueScriptForArrayJob(app, cluster,
+                            ["JOB_ENV_TUTHPC_FILE": file,
+                             "JOB_ENV_TUTHPC_LINE": line.to!string,
+                             "JOB_ENV_TUTHPC_ID": "${PBS_ARRAYID}"],
+                            [], name, [], ppn, taskList.length);
+
+        import std.file;
+        std.file.write("pushToQueue.sh", app.data);
+
+        auto qsub = execute(["qsub", "pushToQueue.sh"]);
+        writeln(qsub.status == 0 ? "Successed push to queue" : "Failed push to queue");
+        writeln("qsub output: ", qsub.output);
+    }else if(nowRunningOnClusterComputingNode()){
+        auto envs = environment.toAA();
+        enforce("JOB_ENV_TUTHPC_LINE" in envs
+             && "JOB_ENV_TUTHPC_FILE" in envs
+             && "JOB_ENV_TUTHPC_ID" in envs, "cannot find environment variables: 'JOB_ENV_TUTHPC_LINE', 'JOB_ENV_TUTHPC_FILE', and 'JOB_ENV_TUTHPC_ID'");
+
+        if(envs["JOB_ENV_TUTHPC_FILE"] == file
+        && envs["JOB_ENV_TUTHPC_LINE"].to!size_t == line)
+        {
+            auto index = envs["JOB_ENV_TUTHPC_ID"].to!size_t();
+            enforce(index < taskList.length);
+
+            taskList[index]();
+        }
     }else{
         import std.parallelism;
 
         foreach(i; iota(taskList.length).parallel)
-            .jobRun(nodes, ppn, i, taskList[i], file, line);
+            taskList[i]();
     }
 }
 
