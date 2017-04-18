@@ -8,6 +8,9 @@ void main()
 
 void mainJob()
 {
+	JobEnvironment env;
+	env.loadModules ~= "matlab";
+
 	auto taskList = new MultiTaskList();
 	foreach(i; 0 .. 20)
 		taskList.append((size_t i){
@@ -19,5 +22,5 @@ void mainJob()
 			pipes.stdin.close();
 		}, i);
 	
-	jobRun(taskList);
+	pushArrayJob(taskList, env);
 }
