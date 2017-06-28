@@ -128,10 +128,8 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
     if(jenv.isEnabledRenameExeFile){
         import std.file;
 
-        //writeln("OK");
-        //writefln("copy: %s -> %s", jenv.originalExename, jenv.renamedExename);
         // check that the renamed file already exists
-        //enforce(exists(jenv.renamedExename), "The file %s already exists. Please set a different file name or delete the file.".format(jenv.renamedExename));
+        enforce(!exists(jenv.renamedExename), "The file %s already exists. Please set a different file name or delete the file.".format(jenv.renamedExename));
 
         writefln("copy: %s -> %s", jenv.originalExename, jenv.renamedExename);
         std.file.copy(jenv.originalExename, jenv.renamedExename);
@@ -183,6 +181,7 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
         }else{
             auto pipes = pipeProcess(["qsub"], Redirect.stdin);
             scope(exit) wait(pipes.pid);
+            scope(failure) kill(pipes.pid);
 
             {
                 auto writer = pipes.stdin.lockingTextWriter;
