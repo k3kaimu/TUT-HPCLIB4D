@@ -3,12 +3,14 @@ module tuthpc.taskqueue;
 import tuthpc.hosts;
 import tuthpc.constant;
 
+import std.algorithm;
 import std.range;
 import std.format;
 import std.conv;
 import std.process;
 import std.stdio;
 import std.exception;
+import std.digest.crc;
 
 
 final class MultiTaskList
@@ -44,6 +46,9 @@ struct JobEnvironment
     string[] unloadModules;     /// module unloadで破棄されるモジュール
     string[] loadModules;       /// module loadで読み込まれるモジュール
     string[string] envs;        /// 環境変数
+    bool isEnabledRenameExeFile = true; /// 実行ジョブファイル名を，バイナリ表現にもとづきユニークな名前に変更します．
+    string originalExename;
+    string renamedExename;
     string[] prescript;         /// プログラム実行前に実行されるシェルスクリプト
     string[] jobScript;         /// ジョブスクリプト
     string[] postscript;        /// プログラム実行後に実行されるシェルスクリプト
@@ -70,8 +75,24 @@ struct JobEnvironment
         if(pvmem == 0) pvmem = maxMemPerPS;
 
         import core.runtime;
-        if(jobScript is null)
-            jobScript = [Runtime.args[0]];
+        if(jobScript is null){
+            originalExename = Runtime.args[0];
+            bool bStartsWithDOTSLASH = false;
+            while(originalExename.startsWith("./")){
+                bStartsWithDOTSLASH = true;
+                originalExename = originalExename[2 .. $];
+            }
+
+            if(isEnabledRenameExeFile && renamedExename is null){
+                import std.file;
+                renamedExename = format("%s_%s", originalExename, crc32Of(cast(ubyte[])std.file.read(originalExename)).toHexString);
+            }
+
+            if(renamedExename is null)
+                jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ originalExename];
+            else
+                jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ renamedExename];
+        }
     }
 
 
@@ -129,7 +150,17 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
     env.useArrayJob = true;
 
     if(nowRunningOnClusterDevelopmentHost()){
-        auto app = appender!string;
+
+        if(env.isEnabledRenameExeFile){
+            import std.file;
+
+            // check that the renamed file already exists
+            enforce(exists(env.renamedExename), "The file %s already exists. Please set a different file name or delete the file.");
+
+            writefln("copy: %s -> %s", env.originalExename, env.renamedExename);
+            std.file.copy(env.originalExename, env.renamedExename);
+        }
+
         auto cluster = loginCluster();
 
         env.envs["JOB_ENV_TUTHPC_FILE"] = file;
@@ -137,6 +168,9 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
         env.envs["JOB_ENV_TUTHPC_ID"] = "${PBS_ARRAYID}";
 
         if(env.scriptPath !is null){
+            auto app = appender!string;
+            makeQueueScript(app, cluster, env, taskList.length);
+
             import std.file;
             std.file.write("pushToQueue.sh", app.data);
 
@@ -174,250 +208,3 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
             taskList[i]();
     }
 }
-
-
-/+
-void makeQueueScriptForMPI(R)(ref R orange, Cluster cluster, string[string] envs, string[][] prescripts, string binName, string[][] postscripts,uint nodes, uint ppn = 0)
-{
-    immutable info = clusters[cluster];
-
-    if(ppn == 0)
-        ppn = info.maxPPN;
-
-    if(nodes > info.maxNode)
-        nodes = info.maxNode;
-
-    makeQueueScriptHeaderForOpenMPI(orange, cluster, nodes, ppn);
-    foreach(i, es; prescripts){
-        foreach(e; es){
-            .put(orange, es);
-            .put(orange, " ");
-        }
-
-        .put(orange, '\n');
-    }
-
-    string envXs;
-    foreach(k, v; envs)
-        envXs ~= format("-x %s=%s ", k, v);
-
-    .put(orange, ["mpirun ", envXs, " -np $MPI_PROCS ", binName, "\n"]);
-    foreach(i, es; postscripts){
-        foreach(e; es){
-            .put(orange, es);
-            .put(orange, " ");
-        }
-
-        .put(orange, '\n');
-    }
-}
-
-
-void makeQueueScriptForArrayJob(R)(ref R orange, Cluster cluster, string[string] envs, string[][] prescripts, string binName, string[][] postscripts, uint ppn, size_t jobCount)
-{
-    immutable info = clusters[cluster];
-
-    if(ppn == 0)
-        ppn = info.maxPPN;
-
-    makeQueueScriptHeaderForArrayJob(orange, cluster, ppn, jobCount);
-    foreach(i, es; prescripts){
-        foreach(e; es){
-            .put(orange, es);
-            .put(orange, " ");
-        }
-
-        .put(orange, '\n');
-    }
-
-    string envXs;
-    foreach(k, v; envs){
-        orange.formattedWrite("export %s=%s\n", k, v);
-    }
-
-    .put(orange, ["./" ~ binName, "\n"]);
-    foreach(i, es; postscripts){
-        foreach(e; es){
-            .put(orange, es);
-            .put(orange, " ");
-        }
-
-        .put(orange, '\n');
-    }
-}
-
-
-void makeQueueScriptHeaderForOpenMPI(R)(ref R orange, Cluster cluster, uint nodes, uint ppn)
-{
-    import std.format : formattedWrite;
-
-    immutable maxMem = clusters[cluster].maxMem / clusters[cluster].maxPPN * ppn,
-              maxMemPerPS = maxMem / ppn;
-
-    .put(orange, "#!/bin/bash\n");
-    orange.formattedWrite("#PBS -l nodes=%s:ppn=%s,mem=%sgb,pmem=%sgb,vmem=%sgb,pvmem=%sgb\n", nodes, ppn, maxMem, maxMemPerPS, maxMem, maxMemPerPS);
-    orange.formattedWrite("#PBS -q %s\n", clusters[cluster].queueName);
-    .put(orange, "source ~/.bashrc\n");
-    .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
-    .put(orange, "cd $PBS_O_WORKDIR\n");
-    .put(orange, "module unload intelmpi.intel\n");
-    .put(orange, "module load openmpi.intel\n");
-}
-
-
-void makeQueueScriptHeaderForArrayJob(R)(ref R orange, Cluster cluster, uint ppn, size_t jobCount)
-{
-    import std.format : formattedWrite;
-
-    immutable maxMem = clusters[cluster].maxMem / clusters[cluster].maxPPN * ppn,
-              maxMemPerPS = maxMem / ppn;
-
-    .put(orange, "#!/bin/bash\n");
-    orange.formattedWrite("#PBS -l nodes=1:ppn=%s\n", ppn);
-    orange.formattedWrite("#PBS -q %s\n", clusters[cluster].queueName);
-    orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
-    .put(orange, "source ~/.bashrc\n");
-    .put(orange, "cd $PBS_O_WORKDIR\n");
-    .put(orange, "module unload intelmpi.intel\n");
-    .put(orange, "module load openmpi.intel\n");
-}
-
-
-void jobRun(T = string)(uint nodes, uint ppn,
-            T id,
-            void delegate() dg,
-            string file = __FILE__,
-            size_t line = __LINE__)
-{
-    import core.runtime : Runtime;
-    import std.format : format, formattedWrite;
-    import std.array : appender;
-    import std.process : execute, environment;
-    import std.stdio : writeln;
-    import std.exception : enforce;
-    import std.conv : to;
-
-    if(nowRunningOnClusterDevelopmentHost()){
-        immutable name = Runtime.args[0];
-        auto app = appender!string;
-
-        auto cluster = loginCluster();
-
-        makeQueueScriptForMPI(app, cluster,
-                            ["JOB_ENV_TUTHPC_FILE": file,
-                             "JOB_ENV_TUTHPC_LINE": line.to!string,
-                             "JOB_ENV_TUTHPC_ID": id.to!string],
-                            [], name, [], nodes, ppn);
-
-        import std.file;
-        std.file.write("pushToQueue.sh", app.data);
-
-        auto qsub = execute(["qsub", "pushToQueue.sh"]);
-        writeln(qsub.status == 0 ? "Successed push to queue" : "Failed push to queue");
-        writeln("qsub output: ", qsub.output);
-    }else if(nowRunningOnClusterComputingNode()){
-        auto envs = environment.toAA();
-        enforce("JOB_ENV_TUTHPC_LINE" in envs
-             && "JOB_ENV_TUTHPC_FILE" in envs
-             && "JOB_ENV_TUTHPC_ID" in envs, "cannot find environment variables: 'JOB_ENV_TUTHPC_LINE', 'JOB_ENV_TUTHPC_FILE', and 'JOB_ENV_TUTHPC_ID'");
-
-        if(envs["JOB_ENV_TUTHPC_FILE"] == file
-        && envs["JOB_ENV_TUTHPC_LINE"].to!size_t == line
-        && envs["JOB_ENV_TUTHPC_ID"] == id.to!string)
-        {
-            dg();
-        }
-    }else{
-        // execute serial
-        dg();
-    }
-}
-
-
-void jobRun(uint nodes, uint ppn,
-            void delegate() dg,
-            string file = __FILE__,
-            size_t line = __LINE__)
-{
-    jobRun(nodes, ppn, "null", dg, file, line);
-}
-
-
-void jobRun(alias func, T = string)(uint nodes = 1, uint ppn = 0,
-                        T id = "none",
-                        string file = __FILE__,
-                        size_t line = __LINE__)
-{
-    jobRun(nodes, ppn, id, delegate(){ func(); },  file, line);
-}
-
-
-void jobRun(alias func)(uint nodes = 1, uint ppn = 0, string file = __FILE__, size_t line = __LINE__)
-{
-    jobRun!func(nodes, ppn, "none", file, line);
-}
-
-
-void jobRun(MultiTaskList taskList, string[] prescirpts = null, string[] postscripts = null, uint ppn = 1, string file = __FILE__, size_t line = __LINE__)
-{
-    import core.runtime : Runtime;
-    import std.format : format, formattedWrite;
-    import std.array : appender;
-    import std.process : execute, environment;
-    import std.stdio : writeln;
-    import std.exception : enforce;
-    import std.conv : to;
-
-    if(nowRunningOnClusterDevelopmentHost()){
-        immutable name = Runtime.args[0];
-        auto app = appender!string;
-
-        auto cluster = loginCluster();
-
-        makeQueueScriptForArrayJob(app, cluster,
-                            ["JOB_ENV_TUTHPC_FILE": file,
-                             "JOB_ENV_TUTHPC_LINE": line.to!string,
-                             "JOB_ENV_TUTHPC_ID": "${PBS_ARRAYID}"],
-                            [], name, [], ppn, taskList.length);
-
-        import std.file;
-        std.file.write("pushToQueue.sh", app.data);
-
-        auto qsub = execute(["qsub", "pushToQueue.sh"]);
-        writeln(qsub.status == 0 ? "Successed push to queue" : "Failed push to queue");
-        writeln("qsub output: ", qsub.output);
-    }else if(nowRunningOnClusterComputingNode()){
-        auto envs = environment.toAA();
-        enforce("JOB_ENV_TUTHPC_LINE" in envs
-             && "JOB_ENV_TUTHPC_FILE" in envs
-             && "JOB_ENV_TUTHPC_ID" in envs, "cannot find environment variables: 'JOB_ENV_TUTHPC_LINE', 'JOB_ENV_TUTHPC_FILE', and 'JOB_ENV_TUTHPC_ID'");
-
-        if(envs["JOB_ENV_TUTHPC_FILE"] == file
-        && envs["JOB_ENV_TUTHPC_LINE"].to!size_t == line)
-        {
-            auto index = envs["JOB_ENV_TUTHPC_ID"].to!size_t();
-            enforce(index < taskList.length);
-
-            taskList[index]();
-        }
-    }else{
-        import std.parallelism;
-
-        foreach(i; iota(taskList.length).parallel)
-            taskList[i]();
-    }
-}
-
-
-//unittest 
-//{
-//    import std.stdio;
-//    auto app = appender!string();
-//    makeQueueScriptForMPI(app, Cluster.wdev,
-//            [["aaaaa", "bbbbb"], ["cccc", "ddddd"]],
-//            "bash",
-//            [["aaaaa", "bbbbb"], ["cccc", "ddddd"]],
-//            20, 0);
-//    writeln(app.data);
-//}
-+/

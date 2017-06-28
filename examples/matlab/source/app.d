@@ -1,8 +1,11 @@
 import std.process;
+import std.stdio;
 import tuthpc.taskqueue;
 
-void main()
+
+void main(string[] args)
 {
+	writeln(args);
 	mainJob();
 }
 
