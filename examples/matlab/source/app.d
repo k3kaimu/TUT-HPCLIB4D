@@ -1,6 +1,7 @@
 import std.process;
 import std.stdio;
 import tuthpc.taskqueue;
+import core.thread;
 
 
 void main(string[] args)
@@ -23,6 +24,8 @@ void mainJob()
 			pipes.stdin.writefln("magic(%s)", i);
 			pipes.stdin.flush();
 			pipes.stdin.close();
+
+			//Thread.sleep(10.minutes);
 		}, i);
 	
 	pushArrayJob(taskList, env);

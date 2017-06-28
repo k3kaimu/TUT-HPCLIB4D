@@ -83,12 +83,13 @@ struct JobEnvironment
                 originalExename = originalExename[2 .. $];
             }
 
-            if(isEnabledRenameExeFile && renamedExename is null){
+            if(isEnabledRenameExeFile && renamedExename.walkLength == 0){
                 import std.file;
                 renamedExename = format("%s_%s", originalExename, crc32Of(cast(ubyte[])std.file.read(originalExename)).toHexString);
+                writeln("Renamed file:", renamedExename);
             }
 
-            if(renamedExename is null)
+            if(!isEnabledRenameExeFile)
                 jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ originalExename];
             else
                 jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ renamedExename];
@@ -124,6 +125,19 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
 
     jenv.applyDefaults(cluster);
 
+    if(jenv.isEnabledRenameExeFile){
+        import std.file;
+
+        //writeln("OK");
+        //writefln("copy: %s -> %s", jenv.originalExename, jenv.renamedExename);
+        // check that the renamed file already exists
+        //enforce(exists(jenv.renamedExename), "The file %s already exists. Please set a different file name or delete the file.".format(jenv.renamedExename));
+
+        writefln("copy: %s -> %s", jenv.originalExename, jenv.renamedExename);
+        std.file.copy(jenv.originalExename, jenv.renamedExename);
+        enforce(execute(["chmod", "+x", jenv.renamedExename]).status == 0);
+    }
+
     .put(orange, "#!/bin/bash\n");
     orange.formattedWrite("#PBS -l nodes=%s:ppn=%s", jenv.nodes, jenv.ppn);
     if(jenv.mem != -1) orange.formattedWrite(",mem=%sgb", jenv.mem);
@@ -150,17 +164,6 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
     env.useArrayJob = true;
 
     if(nowRunningOnClusterDevelopmentHost()){
-
-        if(env.isEnabledRenameExeFile){
-            import std.file;
-
-            // check that the renamed file already exists
-            enforce(exists(env.renamedExename), "The file %s already exists. Please set a different file name or delete the file.");
-
-            writefln("copy: %s -> %s", env.originalExename, env.renamedExename);
-            std.file.copy(env.originalExename, env.renamedExename);
-        }
-
         auto cluster = loginCluster();
 
         env.envs["JOB_ENV_TUTHPC_FILE"] = file;
