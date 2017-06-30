@@ -47,17 +47,23 @@ struct JobEnvironment
     string[] loadModules;       /// module loadで読み込まれるモジュール
     string[string] envs;        /// 環境変数
     bool isEnabledRenameExeFile = true; /// 実行ジョブファイル名を，バイナリ表現にもとづきユニークな名前に変更します．
-    string originalExename;
-    string renamedExename;
+    string originalExeName;     /// リネーム・コピー前の実行ファイル名
+    string renamedExeName;      /// リネーム・コピー後の実行ファイル名
     string[] prescript;         /// プログラム実行前に実行されるシェルスクリプト
     string[] jobScript;         /// ジョブスクリプト
     string[] postscript;        /// プログラム実行後に実行されるシェルスクリプト
+    bool isEnabledTimeCommand = false;  /// timeコマンドをつけるかどうか
     uint ppn = 1;               /// 各ノードで何個のプロセッサを使用するか
     uint nodes = 1;             /// 1つのジョブあたりで実行するノード数
     int mem = -1;               /// 0なら自動設定
     int pmem = -1;              /// 0なら自動設定
     int vmem = -1;              /// 0なら自動設定
     int pvmem = -1;             /// 0なら自動設定
+    bool isEnabledEmailOnError = false;  /// エラー時にメールで通知するかどうか
+    bool isEnabledEmailOnStart = false; /// 実行開始時にメールで通知するかどうか
+    bool isEnabledEmailOnEnd = false;   /// 実行終了時にメールで通知するかどうか
+    string[] emailAddrs;                /// メールを送りたい宛先
+    bool isEnabledEmailByMailgun = false;   /// エラー時のメールをMailgunで配送するか
 
 
     void applyDefaults(Cluster cluster)
@@ -76,23 +82,36 @@ struct JobEnvironment
 
         import core.runtime;
         if(jobScript is null){
-            originalExename = Runtime.args[0];
+            originalExeName = Runtime.args[0];
             bool bStartsWithDOTSLASH = false;
-            while(originalExename.startsWith("./")){
+            while(originalExeName.startsWith("./")){
                 bStartsWithDOTSLASH = true;
-                originalExename = originalExename[2 .. $];
+                originalExeName = originalExeName[2 .. $];
             }
 
-            if(isEnabledRenameExeFile && renamedExename.walkLength == 0){
+            if(isEnabledRenameExeFile && renamedExeName.walkLength == 0){
                 import std.file;
-                renamedExename = format("%s_%s", originalExename, crc32Of(cast(ubyte[])std.file.read(originalExename)).toHexString);
-                writeln("Renamed file:", renamedExename);
+                renamedExeName = format("%s_%s", originalExeName, crc32Of(cast(ubyte[])std.file.read(originalExeName)).toHexString);
+                writeln("Renamed file:", renamedExeName);
             }
 
             if(!isEnabledRenameExeFile)
-                jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ originalExename];
+                jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ originalExeName];
             else
-                jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ renamedExename];
+                jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName];
+
+            if(isEnabledTimeCommand)
+                jobScript[0] = "time " ~ jobScript[0];
+
+            jobScript ~= "echo $?";
+        }
+
+        if(isEnabledEmailOnStart || isEnabledEmailOnEnd || isEnabledEmailOnError) {
+            if(emailAddrs.length == 0){
+                string username = environment.get("USER", null);
+                enforce(username !is null, "Cannot find USER in ENV.");
+                emailAddrs = [username ~ "@edu.tut.ac.jp"];
+            }
         }
     }
 
@@ -104,16 +123,25 @@ struct JobEnvironment
         queueName = rhs.queueName;
         unloadModules = rhs.unloadModules.dup;
         loadModules = rhs.loadModules.dup;
+        foreach(k, v; rhs.envs) envs[k] = v;
+        isEnabledRenameExeFile = rhs.isEnabledRenameExeFile;
+        originalExeName = rhs.originalExeName;
+        renamedExeName = rhs.renamedExeName;
         prescript = rhs.prescript.dup;
         jobScript = rhs.jobScript.dup;
         postscript = rhs.postscript.dup;
-        foreach(k, v; rhs.envs) envs[k] = v;
         ppn = rhs.ppn;
         nodes = rhs.nodes;
         mem = rhs.mem;
         pmem = rhs.pmem;
         vmem = rhs.vmem;
         pvmem = rhs.pvmem;
+        isEnabledEmailOnError = rhs.isEnabledEmailOnError;
+        isEnabledEmailOnStart = rhs.isEnabledEmailOnStart;
+        isEnabledEmailOnEnd = rhs.isEnabledEmailOnEnd;
+        emailAddrs = emailAddrs.dup;
+        isEnabledEmailByMailgun = rhs.isEnabledEmailByMailgun;
+        isEnabledTimeCommand = rhs.isEnabledTimeCommand;
     }
 }
 
@@ -129,11 +157,11 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
         import std.file;
 
         // check that the renamed file already exists
-        enforce(!exists(jenv.renamedExename), "The file %s already exists. Please set a different file name or delete the file.".format(jenv.renamedExename));
+        enforce(!exists(jenv.renamedExeName), "The file %s already exists. Please set a different file name or delete the file.".format(jenv.renamedExeName));
 
-        writefln("copy: %s -> %s", jenv.originalExename, jenv.renamedExename);
-        std.file.copy(jenv.originalExename, jenv.renamedExename);
-        enforce(execute(["chmod", "+x", jenv.renamedExename]).status == 0);
+        writefln("copy: %s -> %s", jenv.originalExeName, jenv.renamedExeName);
+        std.file.copy(jenv.originalExeName, jenv.renamedExeName);
+        enforce(execute(["chmod", "+x", jenv.renamedExeName]).status == 0);
     }
 
     .put(orange, "#!/bin/bash\n");
@@ -145,6 +173,15 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
     .put(orange, '\n');
     orange.formattedWrite("#PBS -q %s\n", jenv.queueName);
     if(jenv.useArrayJob) orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
+    if(jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) {
+        .put(orange, "#PBS -m ");
+        if(jenv.isEnabledEmailOnStart)  .put(orange, 'b');
+        if(jenv.isEnabledEmailOnEnd)    .put(orange, 'e');
+        if(jenv.isEnabledEmailOnError)  .put(orange, 'a');
+        .put(orange, '\n');
+        orange.formattedWrite("#PBS -M %-(%s %)\n", jenv.emailAddrs);
+    }
+    .put(orange, "set -e\n");
     .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
     .put(orange, "cd $PBS_O_WORKDIR\n");
@@ -173,9 +210,9 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
             makeQueueScript(app, cluster, env, taskList.length);
 
             import std.file;
-            std.file.write("pushToQueue.sh", app.data);
+            std.file.write(env.scriptPath, app.data);
 
-            auto qsub = execute(["qsub", "pushToQueue.sh"]);
+            auto qsub = execute(["qsub", env.scriptPath]);
             writeln(qsub.status == 0 ? "Successed push to queue" : "Failed push to queue");
             writeln("qsub output: ", qsub.output);
         }else{
@@ -191,18 +228,59 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
             pipes.stdin.close();
         }
     }else if(nowRunningOnClusterComputingNode()){
-        auto envs = environment.toAA();
-        enforce("JOB_ENV_TUTHPC_LINE" in envs
-             && "JOB_ENV_TUTHPC_FILE" in envs
-             && "JOB_ENV_TUTHPC_ID" in envs, "cannot find environment variables: 'JOB_ENV_TUTHPC_LINE', 'JOB_ENV_TUTHPC_FILE', and 'JOB_ENV_TUTHPC_ID'");
+        auto cluster = Cluster.wdev;
+        env.applyDefaults(cluster);
 
-        if(envs["JOB_ENV_TUTHPC_FILE"] == file
-        && envs["JOB_ENV_TUTHPC_LINE"].to!size_t == line)
+        auto environmentAA = environment.toAA();
+        enforce("JOB_ENV_TUTHPC_LINE" in environmentAA
+             && "JOB_ENV_TUTHPC_FILE" in environmentAA
+             && "JOB_ENV_TUTHPC_ID" in environmentAA, "cannot find environment variables: 'JOB_ENV_TUTHPC_LINE', 'JOB_ENV_TUTHPC_FILE', and 'JOB_ENV_TUTHPC_ID'");
+
+        if(environmentAA["JOB_ENV_TUTHPC_FILE"] == file
+        && environmentAA["JOB_ENV_TUTHPC_LINE"].to!size_t == line)
         {
-            auto index = envs["JOB_ENV_TUTHPC_ID"].to!size_t();
+            auto index = environmentAA["JOB_ENV_TUTHPC_ID"].to!size_t();
             enforce(index < taskList.length);
 
-            taskList[index]();
+            if(auto ex = collectException!Throwable(taskList[index]())){
+                scope(exit)
+                    throw ex;
+
+                if(env.isEnabledEmailOnError && env.isEnabledEmailByMailgun) {
+                    import std.datetime;
+                    import std.conv;
+                    import std.socket;
+                    string[2][] info;
+                    auto jobid = environmentAA.get("PBS_JOBID", "Unknown");
+                    info ~= ["PBS_JOBID",           jobid];
+                    info ~= ["JOB_ENV_TUTHPC_FILE", file];
+                    info ~= ["JOB_ENV_TUTHPC_LINE", line.to!string];
+                    info ~= ["JOB_ENV_TUTHPC_ID",   index.to!string];
+                    info ~= ["PBS_ARRAYID",         environmentAA.get("PBS_ARRAYID", "Unknown")];
+                    info ~= ["Job size",            taskList.length.to!string];
+                    info ~= ["End time",            Clock.currTime.toISOExtString()];
+                    info ~= ["Host",                Socket.hostName()];
+                    info ~= ["Exception",           "\n" ~ ex.to!string];
+
+                    enforce("MAILGUN_APIKEY" in environmentAA
+                        &&  "MAILGUN_DOMAIN" in environmentAA);
+
+                    auto apikey = environmentAA["MAILGUN_APIKEY"];
+                    auto domain = environmentAA["MAILGUN_DOMAIN"];
+
+                    import std.net.curl;
+                    import std.uri;
+                    auto http = HTTP("api.mailgun.net");
+                    http.setAuthentication("api", apikey);
+                    std.net.curl.post("https://api.mailgun.net/v3/%s/messages".format(domain),
+                            ["from": "TUTHPCLib <mailgun@%s>".format(domain),
+                             "to": env.emailAddrs.join(','),
+                             "subject": "Error on Job %s".format(jobid),
+                             "text": "%(%-(%s: \t%)\n%)".format(info)],
+                             http
+                        );
+                }
+            }
         }
     }else{
         import std.parallelism;

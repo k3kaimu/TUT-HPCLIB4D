@@ -16,6 +16,9 @@ import tuthpc.taskqueue;
 
 void main()
 {
+    // ジョブをスケジューラに投入する際の設定
+    JobEnvironment env;
+
     // ジョブスケジューラに投げるジョブリスト
     auto taskList = new MultiTaskList;
 
@@ -30,7 +33,7 @@ void main()
     taskList.append((){ writeln(a); a = 100; writeln(a); });
 
     // ジョブをジョブスケジューラに投げる
-    jobRun(taskList);
+    pushArrayJob(taskList, env);
 
     // ここで a が 12 なのか 100 なのかはわからない．
     // なぜなら，プロセスによってはジョブ2が実行されないためである．
@@ -56,6 +59,9 @@ import tuthpc.taskqueue;
 
 void main()
 {
+    // ジョブをスケジューラに投入する際の設定
+    JobEnvironment env;
+
     // ジョブスケジューラに投げるジョブリスト
     auto taskList = new MultiTaskList;
 
@@ -65,12 +71,9 @@ void main()
     foreach(e; Socket.hostName)
         taskList.append((char c){ writeln(c); }, e);
 
-    jobRun(taskList);
+    pushArrayJob(taskList, env);
 }
 ~~~~~~
-
-
-### 1タスクあたり複数のMPIプロセス(1プロセス1スレッド)方式
 
 
 ### 1タスクあたり1プロセス(1プロセス複数スレッド)方式
@@ -81,53 +84,120 @@ void main()
 
 ## MPIの使用
 
-こんな感じで使える予定．
+MPIはサポートしていません．
 
-~~~~~~d
-import tuthpc.mpi;
-import tuthpc.jobqueue;
+## JobEnvironment
 
++ `JobEnvironment.useArrayJob`
 
-void main()
-{
-    // ジョブスケジューラに4ノードで実行するようにジョブを送る
-    jobRun!mainJob1(4);
+    * `bool`
+    * デフォルト値：`true`
+    * アレイジョブにする場合`true`，個別のジョブを入れる場合は`false`を指定します．現在は`false`でもアレイジョブを投入するようになっています．
 
-    // ジョブスケジューラに10ノードで実行するようにジョブを送る
-    jobRun!mainJob2(10);
-}
++ `JobEnvironment.scriptPath`
 
+    * `string`
+    * デフォルト値：`null`
+    * ジョブ投入用のスクリプトファイルの名前やパスを設定できます．`null`の場合は，`qsub`の標準入力にジョブスクリプトを流し込みます．
 
-void mainJob1()
-{
-    // MPIの使用準備
-    auto env = new MPIEnvironment();
-    auto scheduler = new MPITaskScheduler(env);
++ `JobEnvironment.queueName`
 
-    // 1000回myTask1を呼び出す
-    // Masterノードは，他のWorkerノードに処理を委託する
-    scheduler.run!myTask1("Hello World!".repeat(1000));
+    * `string`
+    * デフォルト値：`null`
+    * ジョブを投入するキュー名を設定できます．`null`の場合は，自動で研究用キュー`wLrchq`が設定されます．
 
-    // こういう感じでRangeを渡す
-    scheduler.run!myTask2(iota(100).zip(iota(100)));
-}
++ `JobEnvironment.unloadModules`
 
+    * `string[]`
+    * デフォルト値：`null`
+    * ジョブを実行する前に`module unload`するもののリストを設定できます．
 
-void mainJob2()
-{
-    // なんかしたいことがあれば
-    ....
-}
++ `JobEnvironment.loadModules`
 
+    * `string[]`
+    * デフォルト値：`null`
+    * ジョブを実行する前に`module load`するもののリストを設定できます．たとえば，`matlab`などの読み込みにつかいます．
 
-void myTask1(string msg)
-{
-    writeln(msg);
-}
++ `JobEnbvironment.envs`
 
+    * `string[string]`
+    * デフォルト値：`null`
+    * ジョブを実行する前に設定する環境変数を指定できます．
 
-void myTask2(int a, int b)
-{
-    writeln(a + b);
-}
-~~~~~~~
++ `JobEnvironment.isEnabledRenameExeFile`
+
+    * `bool`
+    * デフォルト値：`true`
+    * ジョブをキューに投入する前に，実行ファイルの別名コピーを作成するか設定します．`true`ではコピーを作成します．コピー後のファイル名は，実行ファイルのCRC32の値にもとづき設定されます．この機能は，同一のソースコードでコンパイル時定数を変更してジョブを複数投入する場合に有効です．
+
++ `JobEnvironment.originalExeName`
+
+    * `string`
+    * デフォルト値：`null`
+    * 実行ファイルの名前を指定します．デフォルトでは，`Runtime.args[0]`が設定されます．
+
++ `JobEnvironment.renamedExeName`
+
+    * `string`
+    * デフォルト値：`null`
+    * リネーム後の実行ファイルの名前を指定できます．`null`の場合，実行ファイルのCRC32値にもとづいて設定されます．
+
++ `JobEnvironment.prescript`
+
+    * `string[]`
+    * デフォルト値：`null`
+    * ジョブの実行ファイルを実行する前に，前処理を行うシェルスクリプトを指定できます．
+
++ `JobEnvironment.jobScript`
+
+    * `string[]`
+    * デフォルト値：`null`
+    * ジョブで実行するスクリプトを指定できます．`null`のとき，`JobEnvironment.originalExeName`もしくは`JobEnvironment.renamedExeName`が実行されます．つまり，これらの値を`foo`とすると，`./foo`を実行します．
+
++ `JobEnvironment.postScript`
+
+    * `string[]`
+    * デフォルト値：`null`
+    * ジョブの終了前に，後処理を行うシェルスクリプトを指定できます．
+
++ `JobEnvironment.isEnabledTimeCommand`
+
+    * `bool`
+    * デフォルト値：`false`
+    * `JobEnvironment.jobScript`が`null`のとき，`JobEnvironment.originalExeName`もしくは`JobEnvironment.renamedExeName`を実行する際に`time`コマンドで時間を計測するか設定できます．デフォルト値`false`では計測しません．
+
++ `JobEnvironment.ppn`
+
+    * `uint`
+    * デフォルト値：`1`
+    * 1つのジョブが実行される各ノードで何CPU使用するか指定できます．
+
++ `JobEnvironment.nodes`
+
+    * `uint`
+    * デフォルト値：`1`
+    * 1つのジョブを実行するノード数を指定できます．
+
++ `JobEnvironment.mem`, `JobEnvironment.pmem`, `JobEnvironment.vmem`, `JobEnvironment.pvmem`
+
+    * `int`
+    * デフォルト値：`-1`
+    * メモリ使用量を設定できます．`-1`のときは設定されません．`0`のときは，ノードのCPU使用率が高くなるように最大メモリ量とppn値から計算されます．
+
++ `JobEnvironment.isEnabledEmailOnError`, `JobEnvironment.isEnabledEmailOnStart`, `JobEnvironment.isEnabledEmailOnEnd`
+
+    * `bool`
+    * デフォルト値：`false`
+    * ジョブのエラー時，実行開始時，実行終了時にメールを送るかどうか設定できます．
+
++ `JobEnvironment.emailAddrs`
+
+    * `string[]`
+    * デフォルト値：`null`
+    * メールを送る対象のメールアドレスを設定できます．`null`のときは，`{username}@edu.tut.ac.jp`に送られます．
+
++ `JobEnvironment.isEnabledEmailByMailgun`
+
+    * `bool`
+    * デフォルト値：`false`
+    * Mailgunを用いてメールを送るか指定できます．現在はエラー時のみMailgunを利用します．MailgunのAPIキーやドメイン名はそれぞれ環境変数`MAILGUN_APIKEY`及び`MAILGUN_DOMAIN`に設定する必要があります．
