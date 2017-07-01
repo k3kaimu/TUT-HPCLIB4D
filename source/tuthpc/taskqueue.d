@@ -38,11 +38,21 @@ final class MultiTaskList
 }
 
 
+enum DependencySetting
+{
+    success = "afterok",
+    failure = "afternotok",
+    exit = "afterany",
+}
+
+
 struct JobEnvironment
 {
     bool useArrayJob = true;    /// ArrayJobにするかどうか
     string scriptPath;          /// スクリプトファイルの保存場所, nullならパイプでqsubにジョブを送る
     string queueName;           /// nullのとき，自動でclusters[cluster].queueNameに設定される
+    string dependentJob;        /// 依存しているジョブのID
+    DependencySetting dependencySetting = DependencySetting.exit;   /// 依存しているジョブがどの状況でこのジョブを実行するか
     string[] unloadModules;     /// module unloadで破棄されるモジュール
     string[] loadModules;       /// module loadで読み込まれるモジュール
     string[string] envs;        /// 環境変数
@@ -121,6 +131,7 @@ struct JobEnvironment
         useArrayJob = rhs.useArrayJob;
         scriptPath = rhs.scriptPath;
         queueName = rhs.queueName;
+        dependentJob = rhs.dependentJob;
         unloadModules = rhs.unloadModules.dup;
         loadModules = rhs.loadModules.dup;
         foreach(k, v; rhs.envs) envs[k] = v;
@@ -172,6 +183,9 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
     if(jenv.pvmem != -1) orange.formattedWrite(",pvmem=%sgb", jenv.pvmem);
     .put(orange, '\n');
     orange.formattedWrite("#PBS -q %s\n", jenv.queueName);
+    if(jenv.dependentJob.length != 0){
+        orange.formattedWrite("#PBS -W depend=%s:%s", jenv.dependencySetting, jenv.dependentJob);
+    }
     if(jenv.useArrayJob) orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
     if(jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) {
         .put(orange, "#PBS -m ");
@@ -194,9 +208,19 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
 }
 
 
-void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
+struct PushResult
 {
+    string jobId;
+}
+
+
+PushResult run(MultiTaskList taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
+{
+    import std.ascii;
+
     env.useArrayJob = true;
+
+    string dstJobId;
 
     if(nowRunningOnClusterDevelopmentHost()){
         auto cluster = loginCluster();
@@ -214,9 +238,10 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
 
             auto qsub = execute(["qsub", env.scriptPath]);
             writeln(qsub.status == 0 ? "Successed push to queue" : "Failed push to queue");
-            writeln("qsub output: ", qsub.output);
+            //writeln("qsub output: ", qsub.output);
+            dstJobId = qsub.output.until!(a => !a.isDigit).array().to!string;
         }else{
-            auto pipes = pipeProcess(["qsub"], Redirect.stdin);
+            auto pipes = pipeProcess(["qsub"], Redirect.stdin | Redirect.stdout);
             scope(exit) wait(pipes.pid);
             scope(failure) kill(pipes.pid);
 
@@ -226,6 +251,8 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
             }
             pipes.stdin.flush();
             pipes.stdin.close();
+
+            dstJobId = pipes.stdout.byLine.front.until!(a => !a.isDigit).array().to!string;
         }
     }else if(nowRunningOnClusterComputingNode()){
         auto cluster = Cluster.wdev;
@@ -287,4 +314,19 @@ void pushArrayJob(MultiTaskList taskList, JobEnvironment env, string file = __FI
         foreach(i; iota(taskList.length).parallel)
             taskList[i]();
     }
+
+    return PushResult(dstJobId);
 }
+
+
+PushResult afterRunImpl(DependencySetting ds)(PushResult parentJob, MultiTaskList taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
+{
+    env.dependentJob = parentJob.jobId;
+    env.dependencySetting = ds;
+    return run(taskList, env, file, line);
+}
+
+
+alias afterSuccessRun = afterRunImpl!(DependencySetting.success);
+alias afterFailureRun = afterRunImpl!(DependencySetting.failure);
+alias afterExitRun = afterRunImpl!(DependencySetting.exit);

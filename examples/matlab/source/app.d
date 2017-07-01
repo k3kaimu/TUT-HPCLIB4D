@@ -11,10 +11,10 @@ enum bool bCheckErrorMail = true;
 void main(string[] args)
 {
 	writeln(args);
-	mainJob();
+	mainJob1();
 }
 
-void mainJob()
+void mainJob1()
 {
 	JobEnvironment env;
 	env.loadModules ~= "matlab";
@@ -25,9 +25,10 @@ void mainJob()
 		env.isEnabledEmailOnError = true;
 	}
 
-	auto taskList = new MultiTaskList();
-	foreach(i; 0 .. 20)
-		taskList.append((size_t i){
+	auto taskList1 = new MultiTaskList();
+	auto taskList2 = new MultiTaskList();
+	foreach(i; 0 .. 4) {
+		auto dg = (size_t i){
 			if(i == 10 && bCheckErrorMail) throw new Exception("aaaaa");
 			auto pipes = pipeProcess(["matlab", "-nodisplay"], Redirect.stdin);
 			scope(exit) wait(pipes.pid);
@@ -35,7 +36,13 @@ void mainJob()
 			pipes.stdin.writefln("magic(%s)", i);
 			pipes.stdin.flush();
 			pipes.stdin.close();
-		}, i);
+			Thread.sleep(10.msecs);
+		};
+
+		taskList1.append(dg, i);
+		taskList2.append(dg, i);
+	}
 	
-	pushArrayJob(taskList, env);
+	run(taskList1, env)
+	.afterSuccessRun(taskList2, env);
 }
