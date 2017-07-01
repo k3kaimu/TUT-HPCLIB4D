@@ -36,7 +36,7 @@ void mainJob1()
 			pipes.stdin.writefln("magic(%s)", i);
 			pipes.stdin.flush();
 			pipes.stdin.close();
-			Thread.sleep(10.msecs);
+			Thread.sleep(10.minutes);
 		};
 
 		taskList1.append(dg, i);

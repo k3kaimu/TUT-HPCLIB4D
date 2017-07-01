@@ -168,11 +168,11 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
         import std.file;
 
         // check that the renamed file already exists
-        enforce(!exists(jenv.renamedExeName), "The file %s already exists. Please set a different file name or delete the file.".format(jenv.renamedExeName));
-
-        writefln("copy: %s -> %s", jenv.originalExeName, jenv.renamedExeName);
-        std.file.copy(jenv.originalExeName, jenv.renamedExeName);
-        enforce(execute(["chmod", "+x", jenv.renamedExeName]).status == 0);
+        if(!exists(jenv.renamedExeName)) {
+            writefln("copy: %s -> %s", jenv.originalExeName, jenv.renamedExeName);
+            std.file.copy(jenv.originalExeName, jenv.renamedExeName);
+            enforce(execute(["chmod", "+x", jenv.renamedExeName]).status == 0);
+        }
     }
 
     .put(orange, "#!/bin/bash\n");
@@ -184,7 +184,8 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
     .put(orange, '\n');
     orange.formattedWrite("#PBS -q %s\n", jenv.queueName);
     if(jenv.dependentJob.length != 0){
-        orange.formattedWrite("#PBS -W depend=%s:%s", jenv.dependencySetting, jenv.dependentJob);
+        orange.formattedWrite("#PBS -W depend=%s:%s\n", cast(string)jenv.dependencySetting, jenv.dependentJob);
+        writefln("#PBS -W depend=%s:%s", cast(string)jenv.dependencySetting, jenv.dependentJob);
     }
     if(jenv.useArrayJob) orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
     if(jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) {
@@ -239,7 +240,7 @@ PushResult run(MultiTaskList taskList, JobEnvironment env, string file = __FILE_
             auto qsub = execute(["qsub", env.scriptPath]);
             writeln(qsub.status == 0 ? "Successed push to queue" : "Failed push to queue");
             //writeln("qsub output: ", qsub.output);
-            dstJobId = qsub.output.until!(a => !a.isDigit).array().to!string;
+            dstJobId = qsub.output.until!(a => a != '.').array().to!string;
         }else{
             auto pipes = pipeProcess(["qsub"], Redirect.stdin | Redirect.stdout);
             scope(exit) wait(pipes.pid);
@@ -252,7 +253,8 @@ PushResult run(MultiTaskList taskList, JobEnvironment env, string file = __FILE_
             pipes.stdin.flush();
             pipes.stdin.close();
 
-            dstJobId = pipes.stdout.byLine.front.until!(a => !a.isDigit).array().to!string;
+            dstJobId = pipes.stdout.byLine.front.split('.')[0].array().to!string;
+            writeln("ID: ", dstJobId);
         }
     }else if(nowRunningOnClusterComputingNode()){
         auto cluster = Cluster.wdev;
