@@ -40,9 +40,9 @@ final class MultiTaskList
 
 enum DependencySetting
 {
-    success = "afterok",
-    failure = "afternotok",
-    exit = "afterany",
+    success = "afterokarray",
+    failure = "afternotokarray",
+    exit = "afteranyarray",
 }
 
 
@@ -52,7 +52,7 @@ struct JobEnvironment
     string scriptPath;          /// スクリプトファイルの保存場所, nullならパイプでqsubにジョブを送る
     string queueName;           /// nullのとき，自動でclusters[cluster].queueNameに設定される
     string dependentJob;        /// 依存しているジョブのID
-    DependencySetting dependencySetting = DependencySetting.exit;   /// 依存しているジョブがどの状況でこのジョブを実行するか
+    string dependencySetting = DependencySetting.exit;   /// 依存しているジョブがどの状況でこのジョブを実行するか
     string[] unloadModules;     /// module unloadで破棄されるモジュール
     string[] loadModules;       /// module loadで読み込まれるモジュール
     string[string] envs;        /// 環境変数
@@ -102,7 +102,6 @@ struct JobEnvironment
             if(isEnabledRenameExeFile && renamedExeName.walkLength == 0){
                 import std.file;
                 renamedExeName = format("%s_%s", originalExeName, crc32Of(cast(ubyte[])std.file.read(originalExeName)).toHexString);
-                writeln("Renamed file:", renamedExeName);
             }
 
             if(!isEnabledRenameExeFile)
@@ -185,7 +184,6 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
     orange.formattedWrite("#PBS -q %s\n", jenv.queueName);
     if(jenv.dependentJob.length != 0){
         orange.formattedWrite("#PBS -W depend=%s:%s\n", cast(string)jenv.dependencySetting, jenv.dependentJob);
-        writefln("#PBS -W depend=%s:%s", cast(string)jenv.dependencySetting, jenv.dependentJob);
     }
     if(jenv.useArrayJob) orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
     if(jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) {
@@ -238,8 +236,6 @@ PushResult run(MultiTaskList taskList, JobEnvironment env, string file = __FILE_
             std.file.write(env.scriptPath, app.data);
 
             auto qsub = execute(["qsub", env.scriptPath]);
-            writeln(qsub.status == 0 ? "Successed push to queue" : "Failed push to queue");
-            //writeln("qsub output: ", qsub.output);
             dstJobId = qsub.output.until!(a => a != '.').array().to!string;
         }else{
             auto pipes = pipeProcess(["qsub"], Redirect.stdin | Redirect.stdout);

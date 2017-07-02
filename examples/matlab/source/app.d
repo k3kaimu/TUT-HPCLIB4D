@@ -27,6 +27,7 @@ void mainJob1()
 
 	auto taskList1 = new MultiTaskList();
 	auto taskList2 = new MultiTaskList();
+	auto taskList3 = new MultiTaskList();
 	foreach(i; 0 .. 4) {
 		auto dg = (size_t i){
 			if(i == 10 && bCheckErrorMail) throw new Exception("aaaaa");
@@ -36,13 +37,15 @@ void mainJob1()
 			pipes.stdin.writefln("magic(%s)", i);
 			pipes.stdin.flush();
 			pipes.stdin.close();
-			Thread.sleep(10.minutes);
+			Thread.sleep(1.minutes);
 		};
 
 		taskList1.append(dg, i);
 		taskList2.append(dg, i);
+		taskList3.append(dg, i);
 	}
 	
 	run(taskList1, env)
-	.afterSuccessRun(taskList2, env);
+	.afterExitRun(taskList2, env)
+	.afterExitRun(taskList3, env);
 }
