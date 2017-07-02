@@ -20,7 +20,7 @@ void main()
     JobEnvironment env;
 
     // ジョブスケジューラに投げるジョブリスト
-    auto taskList = new MultiTaskList;
+    auto taskList = new MultiTaskList();
 
     // ジョブ1
     // スケジューラに投げるジョブを追加する
@@ -33,7 +33,7 @@ void main()
     taskList.append((){ writeln(a); a = 100; writeln(a); });
 
     // ジョブをジョブスケジューラに投げる
-    pushArrayJob(taskList, env);
+    run(taskList, env);
 
     // ここで a が 12 なのか 100 なのかはわからない．
     // なぜなら，プロセスによってはジョブ2が実行されないためである．
@@ -47,7 +47,7 @@ void main()
 1. クラスタマシン開発用ホストで実行されたとき，`taskList`の情報を元にしてジョブスケジューラにジョブを投げる．
 2. クラスタマシンの計算ノード上で実行されたとき，`taskList`の中から自分が担当するジョブのみを実行する．
 
-したがって，`jobRun(taskList);`を実行するまで，もしくはそれ以降のすべての処理は，並列化されず，(オーバーヘッドとして)すべてのノードで実行されてしまう．
+したがって，`run(taskList, env);`を実行するまで，もしくはそれ以降のすべての処理は，並列化されず，(オーバーヘッドとして)すべてのノードで実行されてしまう．
 
 また，`taskList`は，すべてのノード，すべてのプロセスで全く同一でなければいけない．
 つまり，次のようなプログラムでは実際にはどのようなジョブが実行されるかわからない．
@@ -63,7 +63,7 @@ void main()
     JobEnvironment env;
 
     // ジョブスケジューラに投げるジョブリスト
-    auto taskList = new MultiTaskList;
+    auto taskList = new MultiTaskList();
 
     // 実行ホストのホスト名を使用する
     // 実行される計算機によってはホスト名が異なるため，
@@ -71,7 +71,7 @@ void main()
     foreach(e; Socket.hostName)
         taskList.append((char c){ writeln(c); }, e);
 
-    pushArrayJob(taskList, env);
+    run(taskList, env);
 }
 ~~~~~~
 
