@@ -6,11 +6,24 @@ void main()
 {
     JobEnvironment env;
 
-    auto list = new MultiTaskList();
-    foreach(i; 0 .. 16)
-        list.append((size_t i){
-            writefln("Hello, TUTHPCLib4D! %s", i);
-        }, i);
+    {
+        auto list = new MultiTaskList();
+        foreach(i; 0 .. 16)
+            foreach(j; 0 .. 16)
+                list.append((size_t i){
+                    writefln("Hello, TUTHPCLib4D! %s", i);
+                }, i);
 
-    tuthpc.taskqueue.run(list, env);
+        assert(list.length == 16*16);
+        tuthpc.taskqueue.run(list, env);
+    }
+    {
+        auto list = uniqueTaskAppender((size_t i){ writefln("Hello, TUTHPCLib4D! %s", i); });
+        foreach(i; 0 .. 16)
+            foreach(j; 0 .. 16)
+                list.append(i);
+
+        assert(list.length == 16);
+        tuthpc.taskqueue.run(list, env);
+    }
 }

@@ -11,12 +11,28 @@ import std.process;
 import std.stdio;
 import std.exception;
 import std.digest.crc;
+import std.traits;
+import std.functional;
+
+
+enum bool isTaskList(TL) = is(typeof((TL taskList){
+    foreach(i; 0 .. taskList.length){
+        taskList[i]();
+    }
+}));
 
 
 final class MultiTaskList
 {
     this() {}
-    this(void delegate()[] list) { _tasks = list; }
+
+
+    this(TL)(TL taskList)
+    if(isTaskList!TL)
+    {
+        this ~= taskList;
+    }
+
 
     void append(F, T...)(F func, T args)
     {
@@ -33,8 +49,151 @@ final class MultiTaskList
     size_t length() const @property { return _tasks.length; }
 
 
+    void opOpAssign(string op : "~", TL)(TL taskList)
+    if(isTaskList!TL)
+    {
+        foreach(i; 0 .. taskList.length){
+            this.append(function(typeof(taskList[0]) fn){ fn(); }, taskList[i]);
+        }
+    }
+
+
   private:
     void delegate()[] _tasks;
+}
+
+unittest
+{
+    static assert(isTaskList!MultiTaskList);
+
+    int a = -1;
+    auto taskList = new MultiTaskList(
+        [
+            { a = 0; },
+            { a = 1; },
+            { a = 2; },
+            { a = 3; },
+        ]);
+
+    assert(taskList.length == 4);
+    taskList[0]();
+    assert(a == 0);
+    taskList[1]();
+    assert(a == 1);
+    taskList[2]();
+    assert(a == 2);
+    taskList[3]();
+    assert(a == 3);
+
+    taskList.append((int b){ a = b; }, 4);
+    assert(taskList.length == 5);
+    taskList[4]();
+    assert(a == 4);
+}
+
+
+final class UniqueTaskAppender(Args...)
+{
+    this(void delegate(Args) dg)
+    {
+        _dg = dg;
+    }
+
+
+    this(void function(Args) fp)
+    {
+        _dg = toDelegate(fp);
+    }
+
+
+    void append(Args args)
+    {
+        ArgsType a = ArgsType(args);
+        if(a !in _set){
+            _list ~= a;
+            _set[a] = true;
+        }
+    }
+
+
+    alias put = append;
+
+
+    auto opIndex(size_t idx)
+    {
+        Caller dst = {_dg, _list[idx]};
+        return dst;
+    }
+
+
+    size_t length() const @property { return _list.length; }
+
+
+  private:
+    void delegate(Args) _dg;
+    ArgsType[] _list;
+    bool[ArgsType] _set;
+
+    static struct ArgsType { Args args; }
+    static struct Caller
+    {
+        void delegate(Args) _dg;
+        ArgsType _args;
+
+        void opCall(){ _dg(_args.args); }
+    }
+}
+
+
+auto uniqueTaskAppender(Args...)(void delegate(Args) dg) { return new UniqueTaskAppender!Args(dg); }
+
+
+auto uniqueTaskAppender(Args...)(void function(Args) fp) { return new UniqueTaskAppender!Args(fp); }
+
+
+unittest
+{
+    int[][int] arrAA;
+
+    auto app = uniqueTaskAppender((int a){ arrAA[a] ~= a; });
+
+    .put(app, iota(10).chain(iota(10)));
+    assert(app.length == 10);
+    foreach(i; 0 .. app.length)
+        app[i]();
+
+    foreach(k, e; arrAA)
+        assert(e.length == 1);
+}
+
+
+unittest
+{
+    struct S { int f; }
+    struct ComplexData
+    {
+        int b;
+        long c;
+        string d;
+        int[] e;
+        S s;
+    }
+
+    ComplexData[] args;
+    foreach(i; 0 .. 10){
+        ComplexData data;
+        data.b = 1;
+        data.c = 2;
+        data.d = "foo";
+        data.e = new int[3];
+        data.s.f = 3;
+        args ~= data;
+    }
+
+    auto app = uniqueTaskAppender(function(ComplexData d){  });
+    .put(app, args);
+
+    assert(app.length == 1);
 }
 
 
@@ -213,7 +372,7 @@ struct PushResult
 }
 
 
-PushResult run(MultiTaskList taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
+PushResult run(TL)(TL taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
 {
     import std.ascii;
 
@@ -317,11 +476,14 @@ PushResult run(MultiTaskList taskList, JobEnvironment env, string file = __FILE_
 }
 
 
-PushResult afterRunImpl(DependencySetting ds)(PushResult parentJob, MultiTaskList taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
+template afterRunImpl(DependencySetting ds)
 {
-    env.dependentJob = parentJob.jobId;
-    env.dependencySetting = ds;
-    return run(taskList, env, file, line);
+    PushResult afterRunImpl(TL)(PushResult parentJob, TL taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
+    {
+        env.dependentJob = parentJob.jobId;
+        env.dependencySetting = ds;
+        return run(taskList, env, file, line);
+    }
 }
 
 
