@@ -366,6 +366,14 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
 }
 
 
+struct RunState
+{
+  static:
+    size_t countOfCallRun;
+    bool nowInRun;
+}
+
+
 struct PushResult
 {
     string jobId;
@@ -379,12 +387,20 @@ PushResult run(TL)(TL taskList, JobEnvironment env, string file = __FILE__, size
     env.useArrayJob = true;
 
     string dstJobId;
+    immutable nowInRunOld = RunState.nowInRun;
+
+    RunState.nowInRun = true;
+    scope(exit){
+        RunState.nowInRun = nowInRunOld;
+        if(!RunState.nowInRun)
+            ++RunState.countOfCallRun;
+    }
 
     if(nowRunningOnClusterDevelopmentHost()){
         auto cluster = loginCluster();
 
-        env.envs["JOB_ENV_TUTHPC_FILE"] = file;
-        env.envs["JOB_ENV_TUTHPC_LINE"] = line.to!string;
+        enforce(nowInRunOld == false);
+        env.envs["JOB_ENV_TUTHPC_RUN_ID"] = RunState.countOfCallRun.to!string;
         env.envs["JOB_ENV_TUTHPC_ID"] = "${PBS_ARRAYID}";
 
         if(env.scriptPath !is null){
@@ -411,17 +427,16 @@ PushResult run(TL)(TL taskList, JobEnvironment env, string file = __FILE__, size
             dstJobId = pipes.stdout.byLine.front.split('.')[0].array().to!string;
             writeln("ID: ", dstJobId);
         }
-    }else if(nowRunningOnClusterComputingNode()){
+    }else if(nowRunningOnClusterComputingNode() && nowInRunOld == false){
         auto cluster = Cluster.wdev;
         env.applyDefaults(cluster);
 
         auto environmentAA = environment.toAA();
-        enforce("JOB_ENV_TUTHPC_LINE" in environmentAA
-             && "JOB_ENV_TUTHPC_FILE" in environmentAA
-             && "JOB_ENV_TUTHPC_ID" in environmentAA, "cannot find environment variables: 'JOB_ENV_TUTHPC_LINE', 'JOB_ENV_TUTHPC_FILE', and 'JOB_ENV_TUTHPC_ID'");
+        enforce(
+                "JOB_ENV_TUTHPC_RUN_ID" in environmentAA
+             && "JOB_ENV_TUTHPC_ID" in environmentAA, "cannot find environment variables: 'JOB_ENV_TUTHPC_RUN_ID', and 'JOB_ENV_TUTHPC_ID'");
 
-        if(environmentAA["JOB_ENV_TUTHPC_FILE"] == file
-        && environmentAA["JOB_ENV_TUTHPC_LINE"].to!size_t == line)
+        if(environmentAA["JOB_ENV_TUTHPC_RUN_ID"].to!size_t == RunState.countOfCallRun)
         {
             auto index = environmentAA["JOB_ENV_TUTHPC_ID"].to!size_t();
             enforce(index < taskList.length);
@@ -437,8 +452,9 @@ PushResult run(TL)(TL taskList, JobEnvironment env, string file = __FILE__, size
                     string[2][] info;
                     auto jobid = environmentAA.get("PBS_JOBID", "Unknown");
                     info ~= ["PBS_JOBID",           jobid];
-                    info ~= ["JOB_ENV_TUTHPC_FILE", file];
-                    info ~= ["JOB_ENV_TUTHPC_LINE", line.to!string];
+                    info ~= ["FileName",            file];
+                    info ~= ["Line",                line.to!string];
+                    info ~= ["JOB_ENV_TUTHPC_RUN_ID", environmentAA["JOB_ENV_TUTHPC_RUN_ID"]];
                     info ~= ["JOB_ENV_TUTHPC_ID",   index.to!string];
                     info ~= ["PBS_ARRAYID",         environmentAA.get("PBS_ARRAYID", "Unknown")];
                     info ~= ["Job size",            taskList.length.to!string];
