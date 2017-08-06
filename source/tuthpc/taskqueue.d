@@ -482,7 +482,11 @@ PushResult run(TL)(TL taskList, JobEnvironment env, string file = __FILE__, size
                 }
             }
         }
-    }else{
+    }else if(nowInRunOld == true){
+        foreach(i; 0 .. taskList.length)
+            taskList[i]();
+    }
+    else{
         import std.parallelism;
         foreach(i; iota(taskList.length).parallel)
             taskList[i]();
