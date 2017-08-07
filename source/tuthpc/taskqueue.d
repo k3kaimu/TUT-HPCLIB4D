@@ -103,6 +103,18 @@ unittest
     assert(a == 5);
 }
 
+unittest
+{
+    import std.algorithm;
+    import std.range;
+
+    int a;
+    auto taskList = new MultiTaskList();
+    taskList ~= iota(5).map!(i => (){ a = i; });
+
+    assert(taskList.length == 5);
+}
+
 
 final class UniqueTaskAppender(Args...)
 {
