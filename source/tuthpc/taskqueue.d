@@ -404,7 +404,8 @@ struct PushResult
 }
 
 
-PushResult run(TL)(TL taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
+PushResult run(TL)(TL taskList, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
+if(isTaskList!TL)
 {
     import std.ascii;
 
@@ -522,7 +523,8 @@ PushResult run(TL)(TL taskList, JobEnvironment env, string file = __FILE__, size
 
 template afterRunImpl(DependencySetting ds)
 {
-    PushResult afterRunImpl(TL)(PushResult parentJob, TL taskList, JobEnvironment env, string file = __FILE__, size_t line = __LINE__)
+    PushResult afterRunImpl(TL)(PushResult parentJob, TL taskList, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
+    if(isTaskList!TL)
     {
         env.dependentJob = parentJob.jobId;
         env.dependencySetting = ds;
@@ -534,3 +536,31 @@ template afterRunImpl(DependencySetting ds)
 alias afterSuccessRun = afterRunImpl!(DependencySetting.success);
 alias afterFailureRun = afterRunImpl!(DependencySetting.failure);
 alias afterExitRun = afterRunImpl!(DependencySetting.exit);
+
+
+template toTasks(alias fn)
+{
+    auto toTasks(R)(R range)
+    if(isInputRange!R)
+    {
+        static if(hasLength!R && isRandomAccessRange!R)
+            return range.map!(a => { fn(a); });
+        else
+            return range.array().map!(a => { fn(a); });
+    }
+}
+
+
+unittest
+{
+    int a = -1;
+    auto tasks = iota(10).toTasks!(b => a = b);
+    static assert(isTaskList!(typeof(tasks)));
+
+    assert(tasks.length == 10);
+
+    foreach(i; 0 .. tasks.length){
+        tasks[i]();
+        assert(a == i);
+    }
+}
