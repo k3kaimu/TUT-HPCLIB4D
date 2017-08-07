@@ -34,12 +34,6 @@ final class MultiTaskList
     }
 
 
-    void append(F, T...)(F func, T args)
-    {
-        _tasks ~= delegate() { func(args); };
-    }
-
-
     void delegate() opIndex(size_t idx)
     {
         return _tasks[idx];
@@ -61,6 +55,19 @@ final class MultiTaskList
   private:
     void delegate()[] _tasks;
 }
+
+
+void append(F, T...)(MultiTaskList list, F func, T args)
+{
+    list._tasks ~= delegate() { func(args); };
+}
+
+
+void append(alias func, T...)(MultiTaskList list, T args)
+{
+    list._tasks ~= delegate() { func(args); };
+}
+
 
 unittest
 {
@@ -89,6 +96,11 @@ unittest
     assert(taskList.length == 5);
     taskList[4]();
     assert(a == 4);
+
+    taskList.append!(b => a = b)(5);
+    assert(taskList.length == 6);
+    taskList[5]();
+    assert(a == 5);
 }
 
 
