@@ -60,4 +60,12 @@ void main()
         env.maxArraySize = 5;
         iota(16).toTasks!(i => writeln(i)).run(env);
     }
+    {
+        foreach(i; iota(16).asTasks)
+            writefln("Hello, TUTHPCLib4D! %s", i);
+    }
+    {
+        foreach(i, e; iota(16, 32).asTasks)
+            writefln("Hello, TUTHPCLib4D! %s %s", i, e);
+    }
 }

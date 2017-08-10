@@ -457,8 +457,11 @@ if(isTaskList!TL)
             pipes.stdin.close();
 
             dstJobId = pipes.stdout.byLine.front.split('.')[0].array().to!string;
-            writeln("ID: ", dstJobId);
         }
+
+        writeln("ID: ", dstJobId);
+        writefln("\ttaskList.length: %s", taskList.length);
+        writefln("\tArray Job Size: %s", arrayJobSize);
     }else if(nowRunningOnClusterComputingNode() && nowInRunOld == false){
         auto cluster = Cluster.wdev;
         env.applyDefaults(cluster);
@@ -522,7 +525,7 @@ if(isTaskList!TL)
     }
     else{
         import std.parallelism;
-        foreach(i; iota(taskList.length).parallel)
+        foreach(i; std.parallelism.parallel(iota(taskList.length)))
             taskList[i]();
     }
 
@@ -573,3 +576,52 @@ unittest
         assert(a == i);
     }
 }
+
+
+auto asTasks(R)(R range, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
+if(isInputRange!R)
+{
+    static struct AsTasksResult
+    {
+        alias E = ElementType!R;
+
+        int opApply(int delegate(ref E) dg)
+        {
+            //int result = 0;
+            MultiTaskList taskList = new MultiTaskList();
+            for(size_t i = 0; !_range.empty;){
+                taskList.append(dg, _range.front);
+                ++i;
+                _range.popFront;
+            }
+
+            .run(taskList, _env, _filename, _line);
+
+            return 0;
+        }
+
+
+        int opApply(int delegate(ref size_t, ref E) dg)
+        {
+            MultiTaskList taskList = new MultiTaskList();
+            for(size_t i = 0; !_range.empty;){
+                taskList.append(dg, i, _range.front);
+                ++i;
+                _range.popFront;
+            }
+
+            .run(taskList, _env, _filename, _line);
+            return 0;
+        }
+
+      private:
+        R _range;
+        JobEnvironment _env;
+        string _filename;
+        size_t _line;
+    }
+
+
+    return AsTasksResult(range, env, file, line);
+}
+
