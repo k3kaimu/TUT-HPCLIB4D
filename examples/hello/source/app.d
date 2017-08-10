@@ -61,11 +61,11 @@ void main()
         iota(16).toTasks!(i => writeln(i)).run(env);
     }
     {
-        foreach(i; iota(16).asTasks)
+        foreach(i; iota(16).asTasks(env))
             writefln("Hello, TUTHPCLib4D! %s", i);
     }
     {
-        foreach(i, e; iota(16, 32).asTasks)
+        foreach(i, e; iota(16, 32).asTasks(env))
             writefln("Hello, TUTHPCLib4D! %s %s", i, e);
     }
 }
