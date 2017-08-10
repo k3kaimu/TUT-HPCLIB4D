@@ -61,11 +61,21 @@ void main()
         iota(16).toTasks!(i => writeln(i)).run(env);
     }
     {
-        foreach(i; iota(16).asTasks(env))
+        foreach(i; iota(16).runAsTasks(env))
             writefln("Hello, TUTHPCLib4D! %s", i);
     }
     {
-        foreach(i, e; iota(16, 32).asTasks(env))
+        foreach(i, e; iota(16, 32).runAsTasks(env))
             writefln("Hello, TUTHPCLib4D! %s %s", i, e);
+    }
+    {
+        auto taskList = new MultiTaskList();
+        foreach(e; iota(16).appendAsTasks(taskList))
+            writefln("Hello, TUTHPCLib4D! %s", e);
+
+        foreach(i, e; iota(16).appendAsTasks(taskList))
+            writefln("Hello, TUTHPCLib4D! %s %s", i, e);
+
+        taskList.run(env);
     }
 }

@@ -578,10 +578,10 @@ unittest
 }
 
 
-auto asTasks(R)(R range, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
+auto runAsTasks(R)(R range, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
 if(isInputRange!R)
 {
-    static struct AsTasksResult
+    static struct RunAsTasksResult
     {
         alias E = ElementType!R;
 
@@ -622,6 +622,45 @@ if(isInputRange!R)
     }
 
 
-    return AsTasksResult(range, env, file, line);
+    return RunAsTasksResult(range, env, file, line);
 }
 
+
+auto appendAsTasks(R)(R range, MultiTaskList taskList)
+if(isInputRange!R)
+{
+    static struct AppendAsTasksResult
+    {
+        alias E = ElementType!R;
+
+        int opApply(int delegate(ref E) dg)
+        {
+            for(size_t i = 0; !_range.empty;){
+                _taskList.append(dg, _range.front);
+                ++i;
+                _range.popFront;
+            }
+
+            return 0;
+        }
+
+
+        int opApply(int delegate(ref size_t, ref E) dg)
+        {
+            for(size_t i = 0; !_range.empty;){
+                _taskList.append(dg, i, _range.front);
+                ++i;
+                _range.popFront;
+            }
+
+            return 0;
+        }
+
+      private:
+        R _range;
+        MultiTaskList _taskList;
+    }
+
+
+    return AppendAsTasksResult(range, taskList);
+}
