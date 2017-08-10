@@ -257,6 +257,7 @@ struct JobEnvironment
     bool isEnabledEmailOnEnd = false;   /// 実行終了時にメールで通知するかどうか
     string[] emailAddrs;                /// メールを送りたい宛先
     bool isEnabledEmailByMailgun = false;   /// エラー時のメールをMailgunで配送するか
+    uint maxArraySize = 2048;            /// アレイジョブでの最大のサイズ
 
 
     void applyDefaults(Cluster cluster)
@@ -421,6 +422,11 @@ if(isTaskList!TL)
             ++RunState.countOfCallRun;
     }
 
+
+    size_t arrayJobSize = taskList.length;
+    if(arrayJobSize > env.maxArraySize)
+            arrayJobSize = env.maxArraySize;
+
     if(nowRunningOnClusterDevelopmentHost()){
         auto cluster = loginCluster();
 
@@ -430,7 +436,8 @@ if(isTaskList!TL)
 
         if(env.scriptPath !is null){
             auto app = appender!string;
-            makeQueueScript(app, cluster, env, taskList.length);
+
+            makeQueueScript(app, cluster, env, arrayJobSize);
 
             import std.file;
             std.file.write(env.scriptPath, app.data);
@@ -444,7 +451,7 @@ if(isTaskList!TL)
 
             {
                 auto writer = pipes.stdin.lockingTextWriter;
-                makeQueueScript(writer, cluster, env, taskList.length);
+                makeQueueScript(writer, cluster, env, arrayJobSize);
             }
             pipes.stdin.flush();
             pipes.stdin.close();
@@ -463,47 +470,49 @@ if(isTaskList!TL)
 
         if(environmentAA["JOB_ENV_TUTHPC_RUN_ID"].to!size_t == RunState.countOfCallRun)
         {
-            auto index = environmentAA["JOB_ENV_TUTHPC_ID"].to!size_t();
-            enforce(index < taskList.length);
+            size_t index = environmentAA["JOB_ENV_TUTHPC_ID"].to!size_t();
+            enforce(index < arrayJobSize);
 
-            if(auto ex = collectException!Throwable(taskList[index]())){
-                scope(exit)
-                    throw ex;
+            for(; index < taskList.length; index += env.maxArraySize){
+                if(auto ex = collectException!Throwable(taskList[index]())){
+                    scope(exit)
+                        throw ex;
 
-                if(env.isEnabledEmailOnError && env.isEnabledEmailByMailgun) {
-                    import std.datetime;
-                    import std.conv;
-                    import std.socket;
-                    string[2][] info;
-                    auto jobid = environmentAA.get("PBS_JOBID", "Unknown");
-                    info ~= ["PBS_JOBID",           jobid];
-                    info ~= ["FileName",            file];
-                    info ~= ["Line",                line.to!string];
-                    info ~= ["JOB_ENV_TUTHPC_RUN_ID", environmentAA["JOB_ENV_TUTHPC_RUN_ID"]];
-                    info ~= ["JOB_ENV_TUTHPC_ID",   index.to!string];
-                    info ~= ["PBS_ARRAYID",         environmentAA.get("PBS_ARRAYID", "Unknown")];
-                    info ~= ["Job size",            taskList.length.to!string];
-                    info ~= ["End time",            Clock.currTime.toISOExtString()];
-                    info ~= ["Host",                Socket.hostName()];
-                    info ~= ["Exception",           "\n" ~ ex.to!string];
+                    if(env.isEnabledEmailOnError && env.isEnabledEmailByMailgun) {
+                        import std.datetime;
+                        import std.conv;
+                        import std.socket;
+                        string[2][] info;
+                        auto jobid = environmentAA.get("PBS_JOBID", "Unknown");
+                        info ~= ["PBS_JOBID",           jobid];
+                        info ~= ["FileName",            file];
+                        info ~= ["Line",                line.to!string];
+                        info ~= ["JOB_ENV_TUTHPC_RUN_ID", environmentAA["JOB_ENV_TUTHPC_RUN_ID"]];
+                        info ~= ["JOB_ENV_TUTHPC_ID",   index.to!string];
+                        info ~= ["PBS_ARRAYID",         environmentAA.get("PBS_ARRAYID", "Unknown")];
+                        info ~= ["Job size",            taskList.length.to!string];
+                        info ~= ["End time",            Clock.currTime.toISOExtString()];
+                        info ~= ["Host",                Socket.hostName()];
+                        info ~= ["Exception",           "\n" ~ ex.to!string];
 
-                    enforce("MAILGUN_APIKEY" in environmentAA
-                        &&  "MAILGUN_DOMAIN" in environmentAA);
+                        enforce("MAILGUN_APIKEY" in environmentAA
+                            &&  "MAILGUN_DOMAIN" in environmentAA);
 
-                    auto apikey = environmentAA["MAILGUN_APIKEY"];
-                    auto domain = environmentAA["MAILGUN_DOMAIN"];
+                        auto apikey = environmentAA["MAILGUN_APIKEY"];
+                        auto domain = environmentAA["MAILGUN_DOMAIN"];
 
-                    import std.net.curl;
-                    import std.uri;
-                    auto http = HTTP("api.mailgun.net");
-                    http.setAuthentication("api", apikey);
-                    std.net.curl.post("https://api.mailgun.net/v3/%s/messages".format(domain),
-                            ["from": "TUTHPCLib <mailgun@%s>".format(domain),
-                             "to": env.emailAddrs.join(','),
-                             "subject": "Error on Job %s".format(jobid),
-                             "text": "%(%-(%s: \t%)\n%)".format(info)],
-                             http
-                        );
+                        import std.net.curl;
+                        import std.uri;
+                        auto http = HTTP("api.mailgun.net");
+                        http.setAuthentication("api", apikey);
+                        std.net.curl.post("https://api.mailgun.net/v3/%s/messages".format(domain),
+                                ["from": "TUTHPCLib <mailgun@%s>".format(domain),
+                                 "to": env.emailAddrs.join(','),
+                                 "subject": "Error on Job %s".format(jobid),
+                                 "text": "%(%-(%s: \t%)\n%)".format(info)],
+                                 http
+                            );
+                    }
                 }
             }
         }

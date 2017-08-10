@@ -50,4 +50,14 @@ void main()
             tuthpc.taskqueue.run(list, env);
         }
     }
+
+    import std.range;
+
+    {
+        iota(16).toTasks!(i => writefln("Hello, TUTHPCLib4D! %s", i)).run(env);
+    }
+    {
+        env.maxArraySize = 5;
+        iota(16).toTasks!(i => writeln(i)).run(env);
+    }
 }
