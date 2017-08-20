@@ -1,0 +1,21 @@
+{
+	"name": "link_with_cxx",
+    "authors": [
+        "Kazuki Komatsu"
+    ],
+    "description": "A minimal D application.",
+    "copyright": "Copyright © 2017, Kazuki Komatsu",
+    "license": "NYSL",
+    "dependencies": {
+        "tuthpc": { "path": "../.." }
+    },
+    "preBuildCommands": [
+        "g++ -std=c++14 -c cxxsrc/func.cpp"
+    ],
+    "sourceFiles": [
+        "func.o"
+    ],
+    "libs": [
+        "stdc++"
+    ]
+}
