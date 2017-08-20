@@ -1,6 +1,4 @@
 #include <iostream>
-#include <vector>
-#include <functional>
 #include "tuthpc.hpp"
 
 
