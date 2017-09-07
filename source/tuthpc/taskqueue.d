@@ -1,5 +1,7 @@
 module tuthpc.taskqueue;
 
+import core.runtime;
+
 import tuthpc.hosts;
 import tuthpc.constant;
 
@@ -288,10 +290,11 @@ struct JobEnvironment
                 renamedExeName = format("%s_%s", originalExeName, crc32Of(cast(ubyte[])std.file.read(originalExeName)).toHexString);
             }
 
-            if(!isEnabledRenameExeFile)
-                jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ originalExeName];
-            else
-                jobScript = [(bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName];
+            if(!isEnabledRenameExeFile && renamedExeName.walkLength == 0){
+                renamedExeName = originalExeName;
+            }
+
+            jobScript = [format("%s %(%s %)", (bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName, Runtime.args)];
 
             if(isEnabledTimeCommand)
                 jobScript[0] = "time " ~ jobScript[0];
@@ -477,11 +480,13 @@ if(isTaskList!TL)
             enforce(index < arrayJobSize);
 
             for(; index < taskList.length; index += env.maxArraySize){
-                if(auto ex = collectException!Throwable(taskList[index]())){
-                    scope(exit)
-                        throw ex;
 
-                    if(env.isEnabledEmailOnError && env.isEnabledEmailByMailgun) {
+                if(Runtime.args.canFind("--tuthphc_compute_process")){
+                    taskList[index]();
+                }else{
+                    auto pipes = pipeShell(format("%-(%s %) --tuthphc_compute_process", Runtime.args));
+                    auto status = wait(pipes.pid);
+                    if(status != 0 && env.isEnabledEmailOnError && env.isEnabledEmailByMailgun){
                         import std.datetime;
                         import std.conv;
                         import std.socket;
@@ -496,7 +501,8 @@ if(isTaskList!TL)
                         info ~= ["Job size",            taskList.length.to!string];
                         info ~= ["End time",            Clock.currTime.toISOExtString()];
                         info ~= ["Host",                Socket.hostName()];
-                        info ~= ["Exception",           "\n" ~ ex.to!string];
+                        info ~= ["stdout",              pipes.stdout.byLine.join("\n").to!string];
+                        info ~= ["stderr",              pipes.stderr.byLine.join("\n").to!string];
 
                         enforce("MAILGUN_APIKEY" in environmentAA
                             &&  "MAILGUN_DOMAIN" in environmentAA);
@@ -516,6 +522,9 @@ if(isTaskList!TL)
                                  http
                             );
                     }
+
+                    foreach(str; pipes.stdout.byLine) stdout.writeln(str);
+                    foreach(str; pipes.stderr.byLine) stderr.writeln(str);
                 }
             }
         }
