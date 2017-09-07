@@ -10,12 +10,10 @@ void main()
         auto list = new MultiTaskList();
         foreach(i; 0 .. 16)
             foreach(j; 0 .. 16)
-                list.append((size_t i){
-                    writefln("Hello, TUTHPCLib4D! %s", i);
-                }, i);
+                list.append!writefln("Hello, TUTHPCLib4D! %s", i);
 
         assert(list.length == 16*16);
-        tuthpc.taskqueue.run(list, env);
+        run(list, env);
     }
     {
         auto list = uniqueTaskAppender((size_t i){ writefln("Hello, TUTHPCLib4D! %s", i); });
@@ -24,7 +22,7 @@ void main()
                 list.append(i);
 
         assert(list.length == 16);
-        tuthpc.taskqueue.run(list, env);
+        run(list, env);
     }
     {
         auto list = new MultiTaskList();
@@ -32,33 +30,28 @@ void main()
             list.append((size_t i){
                 auto list2 = new MultiTaskList();
                 foreach(j; 0 .. 16)
-                    list2.append((size_t i, size_t j){
-                        writefln("Hello, TUTHPCLib4D! %s:%s", i, j);
-                    }, i, j);
+                    list2.append!writefln("Hello, TUTHPCLib4D! %s:%s", i, j);
 
-                tuthpc.taskqueue.run(list2, env);
+                run(list2, env);
             }, i);
 
-        tuthpc.taskqueue.run(list, env);
+        run(list, env);
     }
     {
-        foreach(i; 0 .. 16){
+        foreach(i; 0 .. 2){
             auto list = new MultiTaskList();
-            list.append((size_t i){
-                    writefln("Hello, TUTHPCLib4D! %s", i);
-            }, i);
-            tuthpc.taskqueue.run(list, env);
+            list.append!writefln("Hello, TUTHPCLib4D! %s", i);
+            run(list, env);
         }
     }
 
-    import std.range;
-
+    import std.range : iota;
     {
         iota(16).toTasks!(i => writefln("Hello, TUTHPCLib4D! %s", i)).run(env);
     }
     {
         env.maxArraySize = 5;
-        iota(16).toTasks!(i => writeln(i)).run(env);
+        iota(16).toTasks!writeln.run(env);
     }
     {
         foreach(i; iota(16).runAsTasks(env))

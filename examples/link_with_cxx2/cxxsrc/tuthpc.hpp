@@ -5,7 +5,7 @@
 
 
 extern "C"
-typedef int (*tuthpc_callback)(void * obj, unsigned int index);
+typedef void (*tuthpc_callback)(void * obj, unsigned int index);
 
 extern "C"
 void tuthpc_run_tasks(void * obj, unsigned int size, tuthpc_callback callback);
