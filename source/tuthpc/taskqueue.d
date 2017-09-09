@@ -5,6 +5,7 @@ import core.runtime;
 import tuthpc.mail;
 import tuthpc.hosts;
 import tuthpc.constant;
+public import tuthpc.tasklist;
 
 import std.algorithm;
 import std.range;
@@ -17,212 +18,6 @@ import std.digest.crc;
 import std.traits;
 import std.functional;
 import std.datetime;
-
-
-enum bool isTaskList(TL) = is(typeof((TL taskList){
-    foreach(i; 0 .. taskList.length){
-        taskList[i]();
-    }
-}));
-
-
-final class MultiTaskList
-{
-    this() {}
-
-
-    this(TL)(TL taskList)
-    if(isTaskList!TL)
-    {
-        this ~= taskList;
-    }
-
-
-    void delegate() opIndex(size_t idx)
-    {
-        return _tasks[idx];
-    }
-
-
-    size_t length() const @property { return _tasks.length; }
-
-
-    void opOpAssign(string op : "~", TL)(TL taskList)
-    if(isTaskList!TL)
-    {
-        foreach(i; 0 .. taskList.length){
-            this.append(function(typeof(taskList[0]) fn){ fn(); }, taskList[i]);
-        }
-    }
-
-
-  private:
-    void delegate()[] _tasks;
-}
-
-
-void append(F, T...)(MultiTaskList list, F func, T args)
-{
-    list._tasks ~= delegate() { func(args); };
-}
-
-
-void append(alias func, T...)(MultiTaskList list, T args)
-{
-    list._tasks ~= delegate() { func(args); };
-}
-
-
-unittest
-{
-    static assert(isTaskList!MultiTaskList);
-
-    int a = -1;
-    auto taskList = new MultiTaskList(
-        [
-            { a = 0; },
-            { a = 1; },
-            { a = 2; },
-            { a = 3; },
-        ]);
-
-    assert(taskList.length == 4);
-    taskList[0]();
-    assert(a == 0);
-    taskList[1]();
-    assert(a == 1);
-    taskList[2]();
-    assert(a == 2);
-    taskList[3]();
-    assert(a == 3);
-
-    taskList.append((int b){ a = b; }, 4);
-    assert(taskList.length == 5);
-    taskList[4]();
-    assert(a == 4);
-
-    taskList.append!(b => a = b)(5);
-    assert(taskList.length == 6);
-    taskList[5]();
-    assert(a == 5);
-}
-
-unittest
-{
-    import std.algorithm;
-    import std.range;
-
-    int a;
-    auto taskList = new MultiTaskList();
-    taskList ~= iota(5).map!(i => (){ a = i; });
-
-    assert(taskList.length == 5);
-}
-
-
-final class UniqueTaskAppender(Args...)
-{
-    this(void delegate(Args) dg)
-    {
-        _dg = dg;
-    }
-
-
-    this(void function(Args) fp)
-    {
-        _dg = toDelegate(fp);
-    }
-
-
-    void append(Args args)
-    {
-        ArgsType a = ArgsType(args);
-        if(a !in _set){
-            _list ~= a;
-            _set[a] = true;
-        }
-    }
-
-
-    alias put = append;
-
-
-    auto opIndex(size_t idx)
-    {
-        Caller dst = {_dg, _list[idx]};
-        return dst;
-    }
-
-
-    size_t length() const @property { return _list.length; }
-
-
-  private:
-    void delegate(Args) _dg;
-    ArgsType[] _list;
-    bool[ArgsType] _set;
-
-    static struct ArgsType { Args args; }
-    static struct Caller
-    {
-        void delegate(Args) _dg;
-        ArgsType _args;
-
-        void opCall(){ _dg(_args.args); }
-    }
-}
-
-
-auto uniqueTaskAppender(Args...)(void delegate(Args) dg) { return new UniqueTaskAppender!Args(dg); }
-
-
-auto uniqueTaskAppender(Args...)(void function(Args) fp) { return new UniqueTaskAppender!Args(fp); }
-
-
-unittest
-{
-    int[][int] arrAA;
-
-    auto app = uniqueTaskAppender((int a){ arrAA[a] ~= a; });
-
-    .put(app, iota(10).chain(iota(10)));
-    assert(app.length == 10);
-    foreach(i; 0 .. app.length)
-        app[i]();
-
-    foreach(k, e; arrAA)
-        assert(e.length == 1);
-}
-
-
-unittest
-{
-    struct S { int f; }
-    struct ComplexData
-    {
-        int b;
-        long c;
-        string d;
-        int[] e;
-        S s;
-    }
-
-    ComplexData[] args;
-    foreach(i; 0 .. 10){
-        ComplexData data;
-        data.b = 1;
-        data.c = 2;
-        data.d = "foo";
-        data.e = new int[3];
-        data.s.f = 3;
-        args ~= data;
-    }
-
-    auto app = uniqueTaskAppender(function(ComplexData d){  });
-    .put(app, args);
-
-    assert(app.length == 1);
-}
 
 
 enum DependencySetting
@@ -250,6 +45,7 @@ struct JobEnvironment
     string[] jobScript;         /// ジョブスクリプト
     string[] postscript;        /// プログラム実行後に実行されるシェルスクリプト
     bool isEnabledTimeCommand = false;  /// timeコマンドをつけるかどうか
+    uint taskGroupSize = 0;  /// nodes=1:ppn=1のとき，ppn=<taskGroupSize>で投入し，並列実行します
     uint ppn = 1;               /// 各ノードで何個のプロセッサを使用するか
     uint nodes = 1;             /// 1つのジョブあたりで実行するノード数
     int mem = -1;               /// 0なら自動設定
@@ -271,8 +67,14 @@ struct JobEnvironment
         if(ppn == 0) ppn = clusters[cluster].maxPPN;
         if(nodes == 0) nodes = clusters[cluster].maxNode;
 
-        immutable maxMem = clusters[cluster].maxMem / clusters[cluster].maxPPN * ppn,
-                  maxMemPerPS = maxMem / ppn;
+        if(nodes == 1 && ppn == 1 && taskGroupSize == 0){
+            taskGroupSize = 7;
+        }else if(nodes != 1 || ppn != 1){
+            taskGroupSize = 1;
+        }
+
+        immutable maxMem = clusters[cluster].maxMem / clusters[cluster].maxPPN * (ppn * taskGroupSize),
+                  maxMemPerPS = maxMem / (ppn * taskGroupSize);
 
         if(mem == 0) mem = maxMem;
         if(pmem == 0) pmem = maxMemPerPS;
@@ -356,13 +158,8 @@ struct JobEnvironment
 }
 
 
-void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, size_t jobCount = 1)
+void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment jenv, size_t jobCount = 1)
 {
-    JobEnvironment jenv;
-    jenv = env_;
-
-    jenv.applyDefaults(cluster);
-
     if(jenv.isEnabledRenameExeFile){
         import std.file;
 
@@ -375,7 +172,7 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
     }
 
     .put(orange, "#!/bin/bash\n");
-    orange.formattedWrite("#PBS -l nodes=%s:ppn=%s", jenv.nodes, jenv.ppn);
+    orange.formattedWrite("#PBS -l nodes=%s:ppn=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
     if(jenv.mem != -1) orange.formattedWrite(",mem=%sgb", jenv.mem);
     if(jenv.pmem != -1) orange.formattedWrite(",pmem=%sgb", jenv.pmem);
     if(jenv.vmem != -1) orange.formattedWrite(",vmem=%sgb", jenv.vmem);
@@ -434,12 +231,77 @@ struct PushResult
 }
 
 
+void spawnSingleTask(JobEnvironment jenv, string command, string[string] env, string taskName, string file, size_t line)
+{
+    auto startTime = Clock.currTime;
+    auto pipes = pipeShell(command, Redirect.all, env);
+    auto status = wait(pipes.pid);
+
+    {
+        auto writer = stdout.lockingTextWriter;
+        writer.formattedWrite("=========== START OF %s. ===========\n", taskName);
+        foreach(str; pipes.stdout.byLine){
+            writer.put(str);
+            writer.put('\n');
+        }
+        writer.formattedWrite("=========== END OF %s. (status = %s) ===========\n", taskName, status);
+    }
+
+    {
+        auto writer = stderr.lockingTextWriter;
+        bool bFirst = true;
+        foreach(str; pipes.stderr.byLine){
+            if(bFirst){
+                writer.formattedWrite("=========== START OF %s. ===========\n", taskName);
+                bFirst = false;
+            }
+            writer.put(str);
+            writer.put('\n');
+        }
+
+        if(!bFirst){
+            writer.formattedWrite("=========== END OF %s. (status = %s) ===========\n", taskName, status);
+        }
+    }
+
+    if(status != 0 && jenv.isEnabledEmailOnError){
+        auto environmentAA = environment.toAA();
+
+        import std.socket;
+        string[2][] info;
+        auto jobid = environmentAA.get("PBS_JOBID", "Unknown");
+        info ~= ["PBS_JOBID",           jobid];
+        info ~= ["FileName",            file];
+        info ~= ["Line",                line.to!string];
+        if("JOB_ENV_TUTHPC_RUN_ID" in environmentAA)    info ~= ["JOB_ENV_TUTHPC_RUN_ID",       environmentAA["JOB_ENV_TUTHPC_RUN_ID"]];
+        if("JOB_ENV_TUTHPC_ARRAY_ID" in environmentAA)  info ~= ["JOB_ENV_TUTHPC_ARRAY_ID",     environmentAA["JOB_ENV_TUTHPC_ARRAY_ID"]];
+        if("JOB_ENV_TUTHPC_TASK_ID" in environmentAA)   info ~= ["JOB_ENV_TUTHPC_TASK_ID",      environmentAA["JOB_ENV_TUTHPC_TASK_ID"]];
+        info ~= ["PBS_ARRAYID",         environmentAA.get("PBS_ARRAYID", "Unknown")];
+        //info ~= ["Job size",            taskList.length.to!string];
+        info ~= ["Start time",          startTime.toISOExtString()];
+        info ~= ["End time",            Clock.currTime.toISOExtString()];
+        info ~= ["Host",                Socket.hostName()];
+        info ~= ["Process",             format("%-(%s %)", Runtime.args)];
+        info ~= ["stdout",              pipes.stdout.byLine.join("\n").to!string];
+        info ~= ["stderr",              pipes.stderr.byLine.join("\n").to!string];
+
+        tuthpc.mail.sendMail(
+            jenv.emailAddrs.join(','),
+            "Error on Job %s".format(jobid),
+            "%(%-(%s: \t%)\n%)".format(info)
+        );
+    }
+}
+
+
 PushResult run(TL)(TL taskList, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
 if(isTaskList!TL)
 {
     import std.ascii;
 
+    auto cluster = Cluster.wdev;
     env.useArrayJob = true;
+    env.applyDefaults(cluster);
 
     string dstJobId;
     immutable nowInRunOld = RunState.nowInRun;
@@ -451,14 +313,12 @@ if(isTaskList!TL)
             ++RunState.countOfCallRun;
     }
 
-
-    size_t arrayJobSize = taskList.length;
+    size_t arrayJobSize = taskList.length / env.taskGroupSize + (taskList.length % env.taskGroupSize != 0 ? 1 : 0);
     if(arrayJobSize > env.maxArraySize)
-            arrayJobSize = env.maxArraySize;
+        arrayJobSize = env.maxArraySize;
 
-    if(nowRunningOnClusterDevelopmentHost()){
-        auto cluster = loginCluster();
-
+    if(nowRunningOnClusterDevelopmentHost())
+    {
         enforce(nowInRunOld == false);
         env.envs["JOB_ENV_TUTHPC_RUN_ID"] = RunState.countOfCallRun.to!string;
         env.envs["JOB_ENV_TUTHPC_ARRAY_ID"] = "${PBS_ARRAYID}";
@@ -491,10 +351,9 @@ if(isTaskList!TL)
         writeln("ID: ", dstJobId);
         writefln("\ttaskList.length: %s", taskList.length);
         writefln("\tArray Job Size: %s", arrayJobSize);
-    }else if(nowRunningOnClusterComputingNode() && nowInRunOld == false){
-        auto cluster = Cluster.wdev;
-        env.applyDefaults(cluster);
-
+    }
+    else if(nowRunningOnClusterComputingNode() && nowInRunOld == false)
+    {
         auto environmentAA = environment.toAA();
         enforce(
                 "JOB_ENV_TUTHPC_RUN_ID" in environmentAA
@@ -502,8 +361,10 @@ if(isTaskList!TL)
 
         if(environmentAA["JOB_ENV_TUTHPC_RUN_ID"].to!size_t == RunState.countOfCallRun)
         {
-            immutable size_t index = environmentAA["JOB_ENV_TUTHPC_ARRAY_ID"].to!size_t();
+            size_t index = environmentAA["JOB_ENV_TUTHPC_ARRAY_ID"].to!size_t();
             enforce(index < arrayJobSize);
+
+            index *= env.taskGroupSize;
 
             if("JOB_ENV_TUTHPC_TASK_ID" in environmentAA){
                 // 環境変数で指定されたタスクを実行する
@@ -511,67 +372,28 @@ if(isTaskList!TL)
                 taskList[taskIndex]();
             }else{
                 // maxArraySizeで回す
-                for(size_t taskIndex = index; taskIndex < taskList.length; taskIndex += env.maxArraySize){
-                    auto startTime = Clock.currTime;
-
-                    auto pipes = pipeShell(format("%-(%s %)", Runtime.args), Redirect.all,
-                            ["JOB_ENV_TUTHPC_TASK_ID" : taskIndex.to!string]);
-
-                    auto status = wait(pipes.pid);
-
-                    stdout.writefln("=========== START OF %sth task. =========== ", taskIndex);
-                    foreach(str; pipes.stdout.byLine)
-                        stdout.writeln(str);
-                    stdout.writefln("=========== END OF %sth task. (status = %s) =========== ", taskIndex, status);
-
-                    {
-                        bool bFirst = true;
-                        foreach(str; pipes.stderr.byLine){
-                            if(bFirst){
-                                stderr.writefln("=========== START OF %sth task. =========== ", taskIndex);
-                                bFirst = false;
-                            }
-                            stderr.writeln(str);
-                        }
-
-                        if(!bFirst){
-                            stderr.writefln("=========== END OF %sth task. (status = %s) =========== ", taskIndex, status);
-                        }
-                    }
-
-                    if(status != 0 && env.isEnabledEmailOnError){
-                        import std.socket;
-                        string[2][] info;
-                        auto jobid = environmentAA.get("PBS_JOBID", "Unknown");
-                        info ~= ["PBS_JOBID",           jobid];
-                        info ~= ["FileName",            file];
-                        info ~= ["Line",                line.to!string];
-                        info ~= ["JOB_ENV_TUTHPC_RUN_ID",       environmentAA["JOB_ENV_TUTHPC_RUN_ID"]];
-                        info ~= ["JOB_ENV_TUTHPC_ARRAY_ID",     index.to!string];
-                        info ~= ["JOB_ENV_TUTHPC_TASK_ID",      taskIndex.to!string];
-                        info ~= ["PBS_ARRAYID",         environmentAA.get("PBS_ARRAYID", "Unknown")];
-                        info ~= ["Job size",            taskList.length.to!string];
-                        info ~= ["Start time",          startTime.toISOExtString()];
-                        info ~= ["End time",            Clock.currTime.toISOExtString()];
-                        info ~= ["Host",                Socket.hostName()];
-                        info ~= ["Process",             format("%-(%s %)", Runtime.args)];
-                        info ~= ["stdout",              pipes.stdout.byLine.join("\n").to!string];
-                        info ~= ["stderr",              pipes.stderr.byLine.join("\n").to!string];
-
-                        tuthpc.mail.sendMail(
-                            env.emailAddrs.join(','),
-                            "Error on Job %s".format(jobid),
-                            "%(%-(%s: \t%)\n%)".format(info)
-                        );
+                import std.parallelism;
+                foreach(parallelIndex; iota(env.taskGroupSize).parallel){
+                    for(size_t taskIndex = index + parallelIndex; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize){
+                        spawnSingleTask(
+                                env,
+                                format("%-(%s %)", Runtime.args),
+                                ["JOB_ENV_TUTHPC_TASK_ID" : taskIndex.to!string],
+                                "%sth task".format(taskIndex),
+                                file,
+                                line);
                     }
                 }
             }
         }
-    }else if(nowInRunOld == true){
+    }
+    else if(nowInRunOld == true)
+    {
         foreach(i; 0 .. taskList.length)
             taskList[i]();
     }
-    else{
+    else
+    {
         import std.parallelism;
         foreach(i; std.parallelism.parallel(iota(taskList.length)))
             taskList[i]();
