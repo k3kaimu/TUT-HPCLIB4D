@@ -2,6 +2,7 @@ module tuthpc.taskqueue;
 
 import core.runtime;
 
+import tuthpc.mail;
 import tuthpc.hosts;
 import tuthpc.constant;
 
@@ -15,6 +16,7 @@ import std.exception;
 import std.digest.crc;
 import std.traits;
 import std.functional;
+import std.datetime;
 
 
 enum bool isTaskList(TL) = is(typeof((TL taskList){
@@ -254,7 +256,8 @@ struct JobEnvironment
     int pmem = -1;              /// 0なら自動設定
     int vmem = -1;              /// 0なら自動設定
     int pvmem = -1;             /// 0なら自動設定
-    bool isEnabledEmailOnError = false;  /// エラー時にメールで通知するかどうか
+    Duration walltime;          /// walltime, 0なら自動で最大値に設定される
+    bool isEnabledEmailOnError = true;  /// エラー時にメールで通知するかどうか
     bool isEnabledEmailOnStart = false; /// 実行開始時にメールで通知するかどうか
     bool isEnabledEmailOnEnd = false;   /// 実行終了時にメールで通知するかどうか
     string[] emailAddrs;                /// メールを送りたい宛先
@@ -276,6 +279,16 @@ struct JobEnvironment
         if(vmem == 0) vmem = maxMem;
         if(pvmem == 0) pvmem = maxMemPerPS;
 
+        if(walltime == 0.seconds){
+            switch(queueName){
+                case "wLrchq":
+                    walltime = 335.hours;
+                    break;
+                default:
+                    walltime = 1.hours;
+            }
+        }
+
         import core.runtime;
         if(jobScript is null){
             originalExeName = Runtime.args[0];
@@ -294,7 +307,7 @@ struct JobEnvironment
                 renamedExeName = originalExeName;
             }
 
-            jobScript = [format("%s %(%s %)", (bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName, Runtime.args)];
+            jobScript = [format("%s %(%s %)", (bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName, Runtime.args[1 .. $])];
 
             if(isEnabledTimeCommand)
                 jobScript[0] = "time " ~ jobScript[0];
@@ -367,12 +380,23 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
     if(jenv.pmem != -1) orange.formattedWrite(",pmem=%sgb", jenv.pmem);
     if(jenv.vmem != -1) orange.formattedWrite(",vmem=%sgb", jenv.vmem);
     if(jenv.pvmem != -1) orange.formattedWrite(",pvmem=%sgb", jenv.pvmem);
+
     .put(orange, '\n');
+
+    {
+        int hrs, mins, secs;
+        jenv.walltime.split!("hours", "minutes", "seconds")(hrs, mins, secs);
+        orange.formattedWrite("#PBS -l walltime=%d:%02d:%02d\n", hrs, mins, secs);
+    }
+
     orange.formattedWrite("#PBS -q %s\n", jenv.queueName);
+
     if(jenv.dependentJob.length != 0){
         orange.formattedWrite("#PBS -W depend=%s:%s\n", cast(string)jenv.dependencySetting, jenv.dependentJob);
     }
+
     if(jenv.useArrayJob) orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
+
     if(jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) {
         .put(orange, "#PBS -m ");
         if(jenv.isEnabledEmailOnStart)  .put(orange, 'b');
@@ -381,10 +405,12 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment env_, s
         .put(orange, '\n');
         orange.formattedWrite("#PBS -M %-(%s %)\n", jenv.emailAddrs);
     }
+
     .put(orange, "set -e\n");
     .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
     .put(orange, "cd $PBS_O_WORKDIR\n");
+
     foreach(e; jenv.unloadModules) orange.formattedWrite("module unload %s\n", e);
     foreach(e; jenv.loadModules) orange.formattedWrite("module load %s\n", e);
     foreach(k, v; jenv.envs) orange.formattedWrite("export %s=%s\n", k, v);
@@ -435,7 +461,7 @@ if(isTaskList!TL)
 
         enforce(nowInRunOld == false);
         env.envs["JOB_ENV_TUTHPC_RUN_ID"] = RunState.countOfCallRun.to!string;
-        env.envs["JOB_ENV_TUTHPC_ID"] = "${PBS_ARRAYID}";
+        env.envs["JOB_ENV_TUTHPC_ARRAY_ID"] = "${PBS_ARRAYID}";
 
         if(env.scriptPath !is null){
             auto app = appender!string;
@@ -472,59 +498,72 @@ if(isTaskList!TL)
         auto environmentAA = environment.toAA();
         enforce(
                 "JOB_ENV_TUTHPC_RUN_ID" in environmentAA
-             && "JOB_ENV_TUTHPC_ID" in environmentAA, "cannot find environment variables: 'JOB_ENV_TUTHPC_RUN_ID', and 'JOB_ENV_TUTHPC_ID'");
+             && "JOB_ENV_TUTHPC_ARRAY_ID" in environmentAA, "cannot find environment variables: 'JOB_ENV_TUTHPC_RUN_ID', and 'JOB_ENV_TUTHPC_ARRAY_ID'");
 
         if(environmentAA["JOB_ENV_TUTHPC_RUN_ID"].to!size_t == RunState.countOfCallRun)
         {
-            size_t index = environmentAA["JOB_ENV_TUTHPC_ID"].to!size_t();
+            immutable size_t index = environmentAA["JOB_ENV_TUTHPC_ARRAY_ID"].to!size_t();
             enforce(index < arrayJobSize);
 
-            for(; index < taskList.length; index += env.maxArraySize){
+            if("JOB_ENV_TUTHPC_TASK_ID" in environmentAA){
+                // 環境変数で指定されたタスクを実行する
+                immutable size_t taskIndex = environmentAA["JOB_ENV_TUTHPC_TASK_ID"].to!size_t();
+                taskList[taskIndex]();
+            }else{
+                // maxArraySizeで回す
+                for(size_t taskIndex = index; taskIndex < taskList.length; taskIndex += env.maxArraySize){
+                    auto startTime = Clock.currTime;
 
-                if(Runtime.args.canFind("--tuthphc_compute_process")){
-                    taskList[index]();
-                }else{
-                    auto pipes = pipeShell(format("%-(%s %) --tuthphc_compute_process", Runtime.args));
+                    auto pipes = pipeShell(format("%-(%s %)", Runtime.args), Redirect.all,
+                            ["JOB_ENV_TUTHPC_TASK_ID" : taskIndex.to!string]);
+
                     auto status = wait(pipes.pid);
-                    if(status != 0 && env.isEnabledEmailOnError && env.isEnabledEmailByMailgun){
-                        import std.datetime;
-                        import std.conv;
+
+                    stdout.writefln("=========== START OF %sth task. =========== ", taskIndex);
+                    foreach(str; pipes.stdout.byLine)
+                        stdout.writeln(str);
+                    stdout.writefln("=========== END OF %sth task. (status = %s) =========== ", taskIndex, status);
+
+                    {
+                        bool bFirst = true;
+                        foreach(str; pipes.stderr.byLine){
+                            if(bFirst){
+                                stderr.writefln("=========== START OF %sth task. =========== ", taskIndex);
+                                bFirst = false;
+                            }
+                            stderr.writeln(str);
+                        }
+
+                        if(!bFirst){
+                            stderr.writefln("=========== END OF %sth task. (status = %s) =========== ", taskIndex, status);
+                        }
+                    }
+
+                    if(status != 0 && env.isEnabledEmailOnError){
                         import std.socket;
                         string[2][] info;
                         auto jobid = environmentAA.get("PBS_JOBID", "Unknown");
                         info ~= ["PBS_JOBID",           jobid];
                         info ~= ["FileName",            file];
                         info ~= ["Line",                line.to!string];
-                        info ~= ["JOB_ENV_TUTHPC_RUN_ID", environmentAA["JOB_ENV_TUTHPC_RUN_ID"]];
-                        info ~= ["JOB_ENV_TUTHPC_ID",   index.to!string];
+                        info ~= ["JOB_ENV_TUTHPC_RUN_ID",       environmentAA["JOB_ENV_TUTHPC_RUN_ID"]];
+                        info ~= ["JOB_ENV_TUTHPC_ARRAY_ID",     index.to!string];
+                        info ~= ["JOB_ENV_TUTHPC_TASK_ID",      taskIndex.to!string];
                         info ~= ["PBS_ARRAYID",         environmentAA.get("PBS_ARRAYID", "Unknown")];
                         info ~= ["Job size",            taskList.length.to!string];
+                        info ~= ["Start time",          startTime.toISOExtString()];
                         info ~= ["End time",            Clock.currTime.toISOExtString()];
                         info ~= ["Host",                Socket.hostName()];
+                        info ~= ["Process",             format("%-(%s %)", Runtime.args)];
                         info ~= ["stdout",              pipes.stdout.byLine.join("\n").to!string];
                         info ~= ["stderr",              pipes.stderr.byLine.join("\n").to!string];
 
-                        enforce("MAILGUN_APIKEY" in environmentAA
-                            &&  "MAILGUN_DOMAIN" in environmentAA);
-
-                        auto apikey = environmentAA["MAILGUN_APIKEY"];
-                        auto domain = environmentAA["MAILGUN_DOMAIN"];
-
-                        import std.net.curl;
-                        import std.uri;
-                        auto http = HTTP("api.mailgun.net");
-                        http.setAuthentication("api", apikey);
-                        std.net.curl.post("https://api.mailgun.net/v3/%s/messages".format(domain),
-                                ["from": "TUTHPCLib <mailgun@%s>".format(domain),
-                                 "to": env.emailAddrs.join(','),
-                                 "subject": "Error on Job %s".format(jobid),
-                                 "text": "%(%-(%s: \t%)\n%)".format(info)],
-                                 http
-                            );
+                        tuthpc.mail.sendMail(
+                            env.emailAddrs.join(','),
+                            "Error on Job %s".format(jobid),
+                            "%(%-(%s: \t%)\n%)".format(info)
+                        );
                     }
-
-                    foreach(str; pipes.stdout.byLine) stdout.writeln(str);
-                    foreach(str; pipes.stderr.byLine) stderr.writeln(str);
                 }
             }
         }
