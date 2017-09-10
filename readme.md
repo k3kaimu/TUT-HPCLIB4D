@@ -166,6 +166,12 @@ MPIはサポートしていません．
     * デフォルト値：`false`
     * `JobEnvironment.jobScript`が`null`のとき，`JobEnvironment.originalExeName`もしくは`JobEnvironment.renamedExeName`を実行する際に`time`コマンドで時間を計測するか設定できます．デフォルト値`false`では計測しません．
 
++ `JobEnvironment.taskGroupSize`
+    
+    * `uint`
+    * デフォルト値：`0`
+    * `nodes=1:ppn=1`のとき，複数のタスクをまとめて一つのジョブにして投入します．このとき，ppn値をこの値に設定し，この値の個数だけ並列でタスクを実行します．`nodes=1:ppn=1`で，さらにこの値が`0`のとき，この値は`11`として処理されます．この機能は，アレイジョブのジョブ数削減，及びクラスタ計算機の資源を占有しないために存在しています．クラスタ計算機の資源を占有しないためには，この値を`7`〜`14`程度の値にすることが望ましいです．
+
 + `JobEnvironment.ppn`
 
     * `uint`
@@ -196,8 +202,14 @@ MPIはサポートしていません．
     * デフォルト値：`null`
     * メールを送る対象のメールアドレスを設定できます．`null`のときは，`{username}@edu.tut.ac.jp`に送られます．
 
-+ `JobEnvironment.isEnabledEmailByMailgun`
++ `JobEnvironment.maxArraySize`
+
+    * `uint`
+    * デフォルト値: `2048`
+    * アレイジョブにおける最大のジョブ数を指定します．この数以上のジョブを投入しようとしたとき，1つのジョブで複数のタスクを実行することで，自動的にジョブ数がこの値に収まるように調整されます．
+
++ `JobEnvironment.isEnabledQueueOverflowProtection`
 
     * `bool`
-    * デフォルト値：`false`
-    * Mailgunを用いてメールを送るか指定できます．現在はエラー時のみMailgunを利用します．MailgunのAPIキーやドメイン名はそれぞれ環境変数`MAILGUN_APIKEY`及び`MAILGUN_DOMAIN`に設定する必要があります．
+    * デフォルト値：`true`
+    * クラスタのキューには4096個以上のジョブを管理できない制限があります．この制限を超えてジョブを投げることがないように，ジョブ投入の前にチェックするかどうかを指定できます．デフォルト値ではチェックします．
