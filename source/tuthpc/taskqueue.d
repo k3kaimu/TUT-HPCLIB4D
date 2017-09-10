@@ -348,6 +348,9 @@ if(isTaskList!TL)
     auto cluster = Cluster.wdev;
     env.useArrayJob = true;
 
+    if(taskList.length <= 20)
+        env.taskGroupSize = 1;
+
     env.applyDefaults(cluster);
 
     PushResult result;
