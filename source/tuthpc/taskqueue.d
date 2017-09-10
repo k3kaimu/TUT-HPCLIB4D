@@ -58,7 +58,8 @@ struct JobEnvironment
     bool isEnabledEmailOnEnd = false;   /// 実行終了時にメールで通知するかどうか
     string[] emailAddrs;                /// メールを送りたい宛先
     bool isEnabledEmailByMailgun = false;   /// エラー時のメールをMailgunで配送するか
-    uint maxArraySize = 2048;            /// アレイジョブでの最大のサイズ
+    uint maxArraySize = 2048;               /// アレイジョブでの最大のサイズ
+    bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
 
 
     void applyDefaults(Cluster cluster)
@@ -68,7 +69,7 @@ struct JobEnvironment
         if(nodes == 0) nodes = clusters[cluster].maxNode;
 
         if(nodes == 1 && ppn == 1 && taskGroupSize == 0){
-            taskGroupSize = 7;
+            taskGroupSize = 11;
         }else if(nodes != 1 || ppn != 1){
             taskGroupSize = 1;
         }
@@ -129,31 +130,42 @@ struct JobEnvironment
 
     void opAssign(in JobEnvironment rhs)
     {
-        useArrayJob = rhs.useArrayJob;
-        scriptPath = rhs.scriptPath;
-        queueName = rhs.queueName;
-        dependentJob = rhs.dependentJob;
-        unloadModules = rhs.unloadModules.dup;
-        loadModules = rhs.loadModules.dup;
-        foreach(k, v; rhs.envs) envs[k] = v;
-        isEnabledRenameExeFile = rhs.isEnabledRenameExeFile;
-        originalExeName = rhs.originalExeName;
-        renamedExeName = rhs.renamedExeName;
-        prescript = rhs.prescript.dup;
-        jobScript = rhs.jobScript.dup;
-        postscript = rhs.postscript.dup;
-        ppn = rhs.ppn;
-        nodes = rhs.nodes;
-        mem = rhs.mem;
-        pmem = rhs.pmem;
-        vmem = rhs.vmem;
-        pvmem = rhs.pvmem;
-        isEnabledEmailOnError = rhs.isEnabledEmailOnError;
-        isEnabledEmailOnStart = rhs.isEnabledEmailOnStart;
-        isEnabledEmailOnEnd = rhs.isEnabledEmailOnEnd;
-        emailAddrs = emailAddrs.dup;
-        isEnabledEmailByMailgun = rhs.isEnabledEmailByMailgun;
-        isEnabledTimeCommand = rhs.isEnabledTimeCommand;
+        //useArrayJob = rhs.useArrayJob;
+        //scriptPath = rhs.scriptPath;
+        //queueName = rhs.queueName;
+        //dependentJob = rhs.dependentJob;
+        //unloadModules = rhs.unloadModules.dup;
+        //loadModules = rhs.loadModules.dup;
+        //foreach(k, v; rhs.envs) envs[k] = v;
+        //isEnabledRenameExeFile = rhs.isEnabledRenameExeFile;
+        //originalExeName = rhs.originalExeName;
+        //renamedExeName = rhs.renamedExeName;
+        //prescript = rhs.prescript.dup;
+        //jobScript = rhs.jobScript.dup;
+        //postscript = rhs.postscript.dup;
+        //ppn = rhs.ppn;
+        //nodes = rhs.nodes;
+        //mem = rhs.mem;
+        //pmem = rhs.pmem;
+        //vmem = rhs.vmem;
+        //pvmem = rhs.pvmem;
+        //isEnabledEmailOnError = rhs.isEnabledEmailOnError;
+        //isEnabledEmailOnStart = rhs.isEnabledEmailOnStart;
+        //isEnabledEmailOnEnd = rhs.isEnabledEmailOnEnd;
+        //emailAddrs = emailAddrs.dup;
+        //isEnabledEmailByMailgun = rhs.isEnabledEmailByMailgun;
+        //isEnabledTimeCommand = rhs.isEnabledTimeCommand;
+        //isEnabledQueueOverflowProtection = rhs.isEnabledQueueOverflowProtection;
+        foreach(i, ref e; this.tupleof){
+            static if(is(typeof(e) : ulong) || is(typeof(e) : string) || is(typeof(e) : Duration)){
+                e = rhs.tupleof[i];
+            }else static if(is(typeof(e) : string[]) || is(typeof(e) : string[string])){
+                e = null;
+                foreach(k, v; rhs.tupleof[i])
+                    e[k] = v;
+            }else
+                static assert(0);
+        }
     }
 }
 
@@ -231,6 +243,47 @@ struct PushResult
 }
 
 
+struct QueueOverflowProtector
+{
+    static int countOfEnqueuedJobs = -1;
+    static int countOfTotalMyJobs = 0;
+    static bool alreadySpawnAnalyzer = false;
+
+
+    static
+    bool isAnalyzerProcess()
+    {
+        return "TUTHPC_ANALYZE_ALL_JOB" in environment;
+    }
+
+
+    static
+    void analyze(size_t jobSize, size_t runId, string file, size_t line)
+    {
+        enforce(nowRunningOnClusterDevelopmentHost());
+
+        if(isAnalyzerProcess){
+            if(countOfEnqueuedJobs == -1){
+                countOfEnqueuedJobs = tuthpc.hosts.countOfEnqueuedJobs();
+                enforce(countOfEnqueuedJobs != -1, "Cannot get the number of enqueued jobs.");
+            }
+
+            countOfTotalMyJobs += jobSize;
+            writefln("ANALYZE: %s jobs are spawned on %s(%s)[%s]", jobSize, file, line, runId);
+            enforce(countOfTotalMyJobs + countOfEnqueuedJobs < 4000,
+                "Your jobs may cause queue overflow. Please use env.maxArraySize.");
+        }else{
+            if(!alreadySpawnAnalyzer){
+                auto analyzer = executeShell(format("%-(%s %)", Runtime.args), ["TUTHPC_ANALYZE_ALL_JOB" : "TRUE"]);
+                enforce(analyzer.status == 0, "Job analyer is failed. Output of the analyzer is following:\n" ~ analyzer.output);
+                writeln(analyzer.output);
+                alreadySpawnAnalyzer = true;
+            }
+        }
+    }
+}
+
+
 void spawnSingleTask(JobEnvironment jenv, string command, string[string] env, string taskName, string file, size_t line)
 {
     auto startTime = Clock.currTime;
@@ -265,18 +318,16 @@ void spawnSingleTask(JobEnvironment jenv, string command, string[string] env, st
     }
 
     if(status != 0 && jenv.isEnabledEmailOnError){
-        auto environmentAA = environment.toAA();
-
         import std.socket;
         string[2][] info;
-        auto jobid = environmentAA.get("PBS_JOBID", "Unknown");
+        auto jobid = environment.get("PBS_JOBID", "Unknown");
         info ~= ["PBS_JOBID",           jobid];
         info ~= ["FileName",            file];
         info ~= ["Line",                line.to!string];
-        if("JOB_ENV_TUTHPC_RUN_ID" in environmentAA)    info ~= ["JOB_ENV_TUTHPC_RUN_ID",       environmentAA["JOB_ENV_TUTHPC_RUN_ID"]];
-        if("JOB_ENV_TUTHPC_ARRAY_ID" in environmentAA)  info ~= ["JOB_ENV_TUTHPC_ARRAY_ID",     environmentAA["JOB_ENV_TUTHPC_ARRAY_ID"]];
-        if("JOB_ENV_TUTHPC_TASK_ID" in environmentAA)   info ~= ["JOB_ENV_TUTHPC_TASK_ID",      environmentAA["JOB_ENV_TUTHPC_TASK_ID"]];
-        info ~= ["PBS_ARRAYID",         environmentAA.get("PBS_ARRAYID", "Unknown")];
+        if("TUTHPC_JOB_ENV_RUN_ID" in environment)    info ~= ["TUTHPC_JOB_ENV_RUN_ID",       environment["TUTHPC_JOB_ENV_RUN_ID"]];
+        if("TUTHPC_JOB_ENV_ARRAY_ID" in environment)  info ~= ["TUTHPC_JOB_ENV_ARRAY_ID",     environment["TUTHPC_JOB_ENV_ARRAY_ID"]];
+        if("TUTHPC_JOB_ENV_TASK_ID" in environment)   info ~= ["TUTHPC_JOB_ENV_TASK_ID",      environment["TUTHPC_JOB_ENV_TASK_ID"]];
+        info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
         //info ~= ["Job size",            taskList.length.to!string];
         info ~= ["Start time",          startTime.toISOExtString()];
         info ~= ["End time",            Clock.currTime.toISOExtString()];
@@ -301,9 +352,10 @@ if(isTaskList!TL)
 
     auto cluster = Cluster.wdev;
     env.useArrayJob = true;
+
     env.applyDefaults(cluster);
 
-    string dstJobId;
+    PushResult result;
     immutable nowInRunOld = RunState.nowInRun;
 
     RunState.nowInRun = true;
@@ -320,65 +372,54 @@ if(isTaskList!TL)
     if(nowRunningOnClusterDevelopmentHost())
     {
         enforce(nowInRunOld == false);
-        env.envs["JOB_ENV_TUTHPC_RUN_ID"] = RunState.countOfCallRun.to!string;
-        env.envs["JOB_ENV_TUTHPC_ARRAY_ID"] = "${PBS_ARRAYID}";
+        enforce(env.useArrayJob);
 
-        if(env.scriptPath !is null){
-            auto app = appender!string;
+        if(env.isEnabledQueueOverflowProtection){
+            QueueOverflowProtector.analyze(arrayJobSize, RunState.countOfCallRun, file, line);
 
-            makeQueueScript(app, cluster, env, arrayJobSize);
-
-            import std.file;
-            std.file.write(env.scriptPath, app.data);
-
-            auto qsub = execute(["qsub", env.scriptPath]);
-            dstJobId = qsub.output.until!(a => a != '.').array().to!string;
-        }else{
-            auto pipes = pipeProcess(["qsub"], Redirect.stdin | Redirect.stdout);
-            scope(exit) wait(pipes.pid);
-            scope(failure) kill(pipes.pid);
-
-            {
-                auto writer = pipes.stdin.lockingTextWriter;
-                makeQueueScript(writer, cluster, env, arrayJobSize);
-            }
-            pipes.stdin.flush();
-            pipes.stdin.close();
-
-            dstJobId = pipes.stdout.byLine.front.split('.')[0].array().to!string;
+            if(QueueOverflowProtector.isAnalyzerProcess)
+                goto Lreturn;
         }
 
-        writeln("ID: ", dstJobId);
+        // ジョブを投げる
+        result = pushArrayJobToQueue(
+            RunState.countOfCallRun.to!string,
+            arrayJobSize, env, cluster,
+            file, line);
+
+        writeln("ID: ", result.jobId);
         writefln("\ttaskList.length: %s", taskList.length);
         writefln("\tArray Job Size: %s", arrayJobSize);
     }
     else if(nowRunningOnClusterComputingNode() && nowInRunOld == false)
     {
-        auto environmentAA = environment.toAA();
         enforce(
-                "JOB_ENV_TUTHPC_RUN_ID" in environmentAA
-             && "JOB_ENV_TUTHPC_ARRAY_ID" in environmentAA, "cannot find environment variables: 'JOB_ENV_TUTHPC_RUN_ID', and 'JOB_ENV_TUTHPC_ARRAY_ID'");
+                "TUTHPC_JOB_ENV_RUN_ID" in environment
+             && "TUTHPC_JOB_ENV_ARRAY_ID" in environment, "cannot find environment variables: 'TUTHPC_JOB_ENV_RUN_ID', and 'TUTHPC_JOB_ENV_ARRAY_ID'");
 
-        if(environmentAA["JOB_ENV_TUTHPC_RUN_ID"].to!size_t == RunState.countOfCallRun)
+        if(environment["TUTHPC_JOB_ENV_RUN_ID"].to!size_t == RunState.countOfCallRun)
         {
-            size_t index = environmentAA["JOB_ENV_TUTHPC_ARRAY_ID"].to!size_t();
+            size_t index = environment["TUTHPC_JOB_ENV_ARRAY_ID"].to!size_t();
             enforce(index < arrayJobSize);
 
             index *= env.taskGroupSize;
 
-            if("JOB_ENV_TUTHPC_TASK_ID" in environmentAA){
+            if("TUTHPC_JOB_ENV_TASK_ID" in environment){
                 // 環境変数で指定されたタスクを実行する
-                immutable size_t taskIndex = environmentAA["JOB_ENV_TUTHPC_TASK_ID"].to!size_t();
+                immutable size_t taskIndex = environment["TUTHPC_JOB_ENV_TASK_ID"].to!size_t();
                 taskList[taskIndex]();
             }else{
-                // maxArraySizeで回す
+                // 担当するタスクを実行する
                 import std.parallelism;
+
+                // taskGroupSizeで並列化する
                 foreach(parallelIndex; iota(env.taskGroupSize).parallel){
+                    // このスレッドが担当するタスクはindex + parallelIndex + n * env.maxArraySize * env.taskGroupSize番目
                     for(size_t taskIndex = index + parallelIndex; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize){
                         spawnSingleTask(
                                 env,
                                 format("%-(%s %)", Runtime.args),
-                                ["JOB_ENV_TUTHPC_TASK_ID" : taskIndex.to!string],
+                                ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string],
                                 "%sth task".format(taskIndex),
                                 file,
                                 line);
@@ -397,6 +438,44 @@ if(isTaskList!TL)
         import std.parallelism;
         foreach(i; std.parallelism.parallel(iota(taskList.length)))
             taskList[i]();
+    }
+
+  Lreturn:
+    return result;
+}
+
+
+private
+PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment env, Cluster cluster, string file, size_t line)
+{
+    env.envs["TUTHPC_JOB_ENV_RUN_ID"] = runId;
+    env.envs["TUTHPC_JOB_ENV_ARRAY_ID"] = "${PBS_ARRAYID}";
+
+    string dstJobId;
+
+    if(env.scriptPath !is null){
+        auto app = appender!string;
+
+        makeQueueScript(app, cluster, env, arrayJobSize);
+
+        import std.file;
+        std.file.write(env.scriptPath, app.data);
+
+        auto qsub = execute(["qsub", env.scriptPath]);
+        dstJobId = qsub.output.until!(a => a != '.').array().to!string;
+    }else{
+        auto pipes = pipeProcess(["qsub"], Redirect.stdin | Redirect.stdout);
+        scope(exit) wait(pipes.pid);
+        scope(failure) kill(pipes.pid);
+
+        {
+            auto writer = pipes.stdin.lockingTextWriter;
+            makeQueueScript(writer, cluster, env, arrayJobSize);
+        }
+        pipes.stdin.flush();
+        pipes.stdin.close();
+
+        dstJobId = pipes.stdout.byLine.front.split('.')[0].array().to!string;
     }
 
     return PushResult(dstJobId);

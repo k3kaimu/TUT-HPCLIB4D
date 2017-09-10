@@ -85,3 +85,21 @@ unittest
     if(nowRunningOnCDev) assert(loginCluster == Cluster.cdev);
     if(nowRunningOnWDev) assert(loginCluster == Cluster.wdev);
 }
+
+
+int countOfEnqueuedJobs()
+{
+    import std.string;
+    import std.process;
+    import std.conv;
+
+    try{
+        auto qstat = executeShell("qstat -q");
+        if(qstat.status != 0) return -1;
+
+        return qstat.output.chomp.split("\n")[$-1].split(" ")[$-1].to!uint;
+    }catch(Exception ex){
+        return -1;
+    }
+}
+
