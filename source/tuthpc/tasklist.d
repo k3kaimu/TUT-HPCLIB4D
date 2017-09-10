@@ -112,6 +112,8 @@ final class UniqueTaskAppender(Args...)
 
     this(void function(Args) fp)
     {
+        import std.functional : toDelegate;
+
         _dg = toDelegate(fp);
     }
 
