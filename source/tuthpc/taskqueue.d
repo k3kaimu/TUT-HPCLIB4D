@@ -130,32 +130,6 @@ struct JobEnvironment
 
     void opAssign(in JobEnvironment rhs)
     {
-        //useArrayJob = rhs.useArrayJob;
-        //scriptPath = rhs.scriptPath;
-        //queueName = rhs.queueName;
-        //dependentJob = rhs.dependentJob;
-        //unloadModules = rhs.unloadModules.dup;
-        //loadModules = rhs.loadModules.dup;
-        //foreach(k, v; rhs.envs) envs[k] = v;
-        //isEnabledRenameExeFile = rhs.isEnabledRenameExeFile;
-        //originalExeName = rhs.originalExeName;
-        //renamedExeName = rhs.renamedExeName;
-        //prescript = rhs.prescript.dup;
-        //jobScript = rhs.jobScript.dup;
-        //postscript = rhs.postscript.dup;
-        //ppn = rhs.ppn;
-        //nodes = rhs.nodes;
-        //mem = rhs.mem;
-        //pmem = rhs.pmem;
-        //vmem = rhs.vmem;
-        //pvmem = rhs.pvmem;
-        //isEnabledEmailOnError = rhs.isEnabledEmailOnError;
-        //isEnabledEmailOnStart = rhs.isEnabledEmailOnStart;
-        //isEnabledEmailOnEnd = rhs.isEnabledEmailOnEnd;
-        //emailAddrs = emailAddrs.dup;
-        //isEnabledEmailByMailgun = rhs.isEnabledEmailByMailgun;
-        //isEnabledTimeCommand = rhs.isEnabledTimeCommand;
-        //isEnabledQueueOverflowProtection = rhs.isEnabledQueueOverflowProtection;
         foreach(i, ref e; this.tupleof){
             static if(is(typeof(e) : ulong) || is(typeof(e) : string) || is(typeof(e) : Duration)){
                 e = rhs.tupleof[i];
