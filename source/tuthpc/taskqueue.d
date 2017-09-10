@@ -63,6 +63,25 @@ struct JobEnvironment
 
     void applyDefaults(Cluster cluster)
     {
+        import std.getopt;
+
+        auto args = Runtime.args;
+        getopt(args,
+            std.getopt.config.passThrough,
+            "th:queue|th:q", &queueName,
+            "th:after|th:a", &dependentJob,
+            "th:ppn|th:p", &ppn,
+            "th:nodes|th:n", &nodes,
+            "th:taskGroupSize|th:g", &taskGroupSize,
+            "th:walltime|th:w", (string h){ walltime = h.to!uint.hours; },
+            "th:mailOnError|th:me", &isEnabledEmailOnError,
+            "th:mailOnStart|th:ms", &isEnabledEmailOnStart,
+            "th:mailOnFinish|th:mf", &isEnabledEmailOnEnd,
+            "th:mailTo", &emailAddrs,
+            "th:maxArraySize|th:m", &maxArraySize,
+            "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
+        );
+
         if(queueName is null) queueName = clusters[cluster].queueName;
         if(ppn == 0) ppn = clusters[cluster].maxPPN;
         if(nodes == 0) nodes = clusters[cluster].maxNode;
@@ -109,7 +128,7 @@ struct JobEnvironment
                 renamedExeName = originalExeName;
             }
 
-            jobScript = [format("%s %(%s %)", (bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName, Runtime.args[1 .. $])];
+            jobScript = [format("%s %-('%s'%| %)", (bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName, Runtime.args[1 .. $])];
 
             if(isEnabledTimeCommand)
                 jobScript[0] = "time " ~ jobScript[0];
@@ -247,7 +266,10 @@ struct QueueOverflowProtector
                 "Your jobs may cause queue overflow. Please use env.maxArraySize.");
         }else{
             if(!alreadySpawnAnalyzer){
-                auto analyzer = executeShell(format("%-(%s %)", Runtime.args), ["TUTHPC_ANALYZE_ALL_JOB" : "TRUE"]);
+                string cmd = format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]);
+                writefln("The job analyzer is spawned with \"%s\".", cmd);
+
+                auto analyzer = executeShell(cmd, ["TUTHPC_ANALYZE_ALL_JOB" : "TRUE"]);
                 enforce(analyzer.status == 0, "Job analyer is failed. Output of the analyzer is following:\n" ~ analyzer.output);
                 writeln(analyzer.output);
                 alreadySpawnAnalyzer = true;
@@ -391,7 +413,7 @@ if(isTaskList!TL)
                     for(size_t taskIndex = index + parallelIndex; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize){
                         spawnSingleTask(
                                 env,
-                                format("%-(%s %)", Runtime.args),
+                                format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]),
                                 ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string],
                                 "%sth task".format(taskIndex),
                                 file,
