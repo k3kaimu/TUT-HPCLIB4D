@@ -264,12 +264,6 @@ struct QueueOverflowProtector
             writefln("ANALYZE: %s jobs are spawned on %s(%s)[%s]", jobSize, file, line, runId);
             enforce(countOfTotalMyJobs + countOfEnqueuedJobs < 4000,
                 "Your jobs may cause queue overflow. Please use env.maxArraySize.");
-
-            // ファイルに値を書き出す
-            {
-                File file = File("analyzed.tuthpc.txt", "w");
-                file.writeln(countOfTotalMyJobs);
-            }
         }else{
             if(!alreadySpawnAnalyzer){
                 string cmd = format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]);
@@ -354,13 +348,6 @@ if(isTaskList!TL)
     auto cluster = Cluster.wdev;
     env.useArrayJob = true;
 
-    if(nowRunningOnClusterDevelopmentHost() && env.isEnabledQueueOverflowProtection){
-        QueueOverflowProtector.analyze(arrayJobSize, RunState.countOfCallRun, file, line);
-
-        if(QueueOverflowProtector.isAnalyzerProcess)
-            goto Lreturn;
-    }
-
     if(env.nodes == 1 && env.ppn == 1 && env.taskGroupSize == 0){
         if(taskList.length <= 40)
             env.taskGroupSize = 1;
@@ -390,6 +377,13 @@ if(isTaskList!TL)
     {
         enforce(nowInRunOld == false);
         enforce(env.useArrayJob);
+
+        if(nowRunningOnClusterDevelopmentHost() && env.isEnabledQueueOverflowProtection){
+            QueueOverflowProtector.analyze(arrayJobSize, RunState.countOfCallRun, file, line);
+
+            if(QueueOverflowProtector.isAnalyzerProcess)
+                goto Lreturn;
+        }
 
         // ジョブを投げる
         result = pushArrayJobToQueue(
