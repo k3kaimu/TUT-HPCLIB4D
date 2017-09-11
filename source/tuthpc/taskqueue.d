@@ -322,6 +322,7 @@ void spawnSingleTask(JobEnvironment jenv, string command, string[string] env, st
         if("TUTHPC_JOB_ENV_RUN_ID" in environment)    info ~= ["TUTHPC_JOB_ENV_RUN_ID",       environment["TUTHPC_JOB_ENV_RUN_ID"]];
         if("TUTHPC_JOB_ENV_ARRAY_ID" in environment)  info ~= ["TUTHPC_JOB_ENV_ARRAY_ID",     environment["TUTHPC_JOB_ENV_ARRAY_ID"]];
         if("TUTHPC_JOB_ENV_TASK_ID" in environment)   info ~= ["TUTHPC_JOB_ENV_TASK_ID",      environment["TUTHPC_JOB_ENV_TASK_ID"]];
+        if("TUTHPC_JOB_ENV_TASK_ID" in env)   info ~= ["TUTHPC_JOB_ENV_TASK_ID",      env["TUTHPC_JOB_ENV_TASK_ID"]];
         info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
         //info ~= ["Job size",            taskList.length.to!string];
         info ~= ["Start time",          startTime.toISOExtString()];
