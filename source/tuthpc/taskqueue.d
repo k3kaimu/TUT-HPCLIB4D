@@ -245,7 +245,7 @@ struct QueueOverflowProtector
     static
     bool isAnalyzerProcess()
     {
-        return "TUTHPC_ANALYZE_ALL_JOB" in environment;
+        return environment.get("TUTHPC_ANALYZE_ALL_JOB") !is null;
     }
 
 
@@ -319,10 +319,10 @@ void spawnSingleTask(JobEnvironment jenv, string command, string[string] env, st
         info ~= ["PBS_JOBID",           jobid];
         info ~= ["FileName",            file];
         info ~= ["Line",                line.to!string];
-        if("TUTHPC_JOB_ENV_RUN_ID" in environment)    info ~= ["TUTHPC_JOB_ENV_RUN_ID",       environment["TUTHPC_JOB_ENV_RUN_ID"]];
-        if("TUTHPC_JOB_ENV_ARRAY_ID" in environment)  info ~= ["TUTHPC_JOB_ENV_ARRAY_ID",     environment["TUTHPC_JOB_ENV_ARRAY_ID"]];
-        if("TUTHPC_JOB_ENV_TASK_ID" in environment)   info ~= ["TUTHPC_JOB_ENV_TASK_ID",      environment["TUTHPC_JOB_ENV_TASK_ID"]];
-        if("TUTHPC_JOB_ENV_TASK_ID" in env)   info ~= ["TUTHPC_JOB_ENV_TASK_ID",      env["TUTHPC_JOB_ENV_TASK_ID"]];
+        if(auto s = environment.get("TUTHPC_JOB_ENV_RUN_ID"))   info ~= ["TUTHPC_JOB_ENV_RUN_ID",       s];
+        if(auto s = environment.get("TUTHPC_JOB_ENV_ARRAY_ID")) info ~= ["TUTHPC_JOB_ENV_ARRAY_ID",     s];
+        if(auto s = environment.get("TUTHPC_JOB_ENV_TASK_ID"))  info ~= ["TUTHPC_JOB_ENV_TASK_ID",      s];
+        if(auto s = env.get("TUTHPC_JOB_ENV_TASK_ID", null))    info ~= ["TUTHPC_JOB_ENV_TASK_ID",      s];
         info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
         //info ~= ["Job size",            taskList.length.to!string];
         info ~= ["Start time",          startTime.toISOExtString()];
@@ -399,8 +399,8 @@ if(isTaskList!TL)
     else if(nowRunningOnClusterComputingNode() && nowInRunOld == false)
     {
         enforce(
-                "TUTHPC_JOB_ENV_RUN_ID" in environment
-             && "TUTHPC_JOB_ENV_ARRAY_ID" in environment, "cannot find environment variables: 'TUTHPC_JOB_ENV_RUN_ID', and 'TUTHPC_JOB_ENV_ARRAY_ID'");
+                environment.get("TUTHPC_JOB_ENV_RUN_ID")
+             && environment.get("TUTHPC_JOB_ENV_ARRAY_ID"), "cannot find environment variables: 'TUTHPC_JOB_ENV_RUN_ID', and 'TUTHPC_JOB_ENV_ARRAY_ID'");
 
         if(environment["TUTHPC_JOB_ENV_RUN_ID"].to!size_t == RunState.countOfCallRun)
         {
@@ -409,9 +409,9 @@ if(isTaskList!TL)
 
             index *= env.taskGroupSize;
 
-            if("TUTHPC_JOB_ENV_TASK_ID" in environment){
+            if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
                 // 環境変数で指定されたタスクを実行する
-                immutable size_t taskIndex = environment["TUTHPC_JOB_ENV_TASK_ID"].to!size_t();
+                immutable size_t taskIndex = strOfTaskID.to!size_t();
                 taskList[taskIndex]();
             }else{
                 // 担当するタスクを実行する
@@ -440,9 +440,23 @@ if(isTaskList!TL)
     }
     else
     {
-        import std.parallelism;
-        foreach(i; std.parallelism.parallel(iota(taskList.length)))
-            taskList[i]();
+        if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
+            immutable size_t taskIndex = strOfTaskID.to!size_t();
+            taskList[taskIndex]();
+        }else{
+            import std.parallelism;
+
+            import std.parallelism;
+            foreach(taskIndex; iota(taskList.length).parallel){
+                spawnSingleTask(
+                    env,
+                    format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]),
+                    ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string],
+                    "%sth task".format(taskIndex),
+                    file,
+                    line);
+            }
+        }
     }
 
   Lreturn:

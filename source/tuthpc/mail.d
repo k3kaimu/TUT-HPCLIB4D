@@ -9,8 +9,8 @@ import std.exception;
 
 void sendMail(string to, string title, string msg)
 {
-    if("MAILGUN_APIKEY" in environment
-    && "MAILGUN_DOMAIN" in environment)
+    if(environment.get("MAILGUN_APIKEY")
+    && environment.get("MAILGUN_DOMAIN"))
     {
         auto apikey = environment["MAILGUN_APIKEY"];
         auto domain = environment["MAILGUN_DOMAIN"];
