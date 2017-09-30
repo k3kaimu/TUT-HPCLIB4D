@@ -59,6 +59,7 @@ struct JobEnvironment
     string[] emailAddrs;                /// メールを送りたい宛先
     uint maxArraySize = 2048;               /// アレイジョブでの最大のサイズ
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
+    //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
 
 
     void applyDefaults(Cluster cluster)
@@ -110,6 +111,14 @@ struct JobEnvironment
             }
         }
 
+        if(isEnabledEmailOnStart || isEnabledEmailOnEnd || isEnabledEmailOnError) {
+            if(emailAddrs.length == 0){
+                string username = environment.get("USER", null);
+                enforce(username !is null, "Cannot find USER in ENV.");
+                emailAddrs = [username ~ "@edu.tut.ac.jp"];
+            }
+        }
+
         import core.runtime;
         if(jobScript is null){
             originalExeName = Runtime.args[0];
@@ -133,15 +142,29 @@ struct JobEnvironment
             if(isEnabledTimeCommand)
                 jobScript[0] = "time " ~ jobScript[0];
 
-            jobScript ~= "echo $?";
-        }
-
-        if(isEnabledEmailOnStart || isEnabledEmailOnEnd || isEnabledEmailOnError) {
-            if(emailAddrs.length == 0){
-                string username = environment.get("USER", null);
-                enforce(username !is null, "Cannot find USER in ENV.");
-                emailAddrs = [username ~ "@edu.tut.ac.jp"];
+            if(isEnabledEmailOnError){
+                if(environment.get("MAILGUN_APIKEY")
+                && environment.get("MAILGUN_DOMAIN"))
+                {
+                    jobScript[0] = format("(%s) || (%s)", jobScript[0],
+                            (   `curl -s --user 'api:%s'`
+                                ~ ` https://api.mailgun.net/v3/%s/messages`
+                                ~ ` -F from='TUTHPCLib <mailgun@%s>'`
+                                ~ ` -F to='%s'`
+                                ~ ` -F subject='%s'`
+                                ~ ` -F text="%s"`
+                            ).format(
+                                environment.get("MAILGUN_APIKEY"),
+                                environment.get("MAILGUN_DOMAIN"),
+                                environment.get("MAILGUN_DOMAIN"),
+                                emailAddrs.join(','),
+                                "FATAL ERROR: Maybe segmentation fault?",
+                                "$(env)")
+                        );
+                }
             }
+
+            jobScript ~= "echo $?";
         }
     }
 
@@ -279,9 +302,9 @@ struct QueueOverflowProtector
 }
 
 
-void spawnSingleTask(JobEnvironment jenv, string command, string[string] env, string taskName, string file, size_t line)
+deprecated
+void spawnSingleTask(string command, in string[string] env, string taskName)
 {
-    auto startTime = Clock.currTime;
     auto pipes = pipeShell(command, Redirect.all, env);
     auto status = wait(pipes.pid);
 
@@ -312,31 +335,43 @@ void spawnSingleTask(JobEnvironment jenv, string command, string[string] env, st
         }
     }
 
-    if(status != 0 && jenv.isEnabledEmailOnError){
-        import std.socket;
-        string[2][] info;
-        auto jobid = environment.get("PBS_JOBID", "Unknown");
-        info ~= ["PBS_JOBID",           jobid];
-        info ~= ["FileName",            file];
-        info ~= ["Line",                line.to!string];
-        if(auto s = environment.get("TUTHPC_JOB_ENV_RUN_ID"))   info ~= ["TUTHPC_JOB_ENV_RUN_ID",       s];
-        if(auto s = environment.get("TUTHPC_JOB_ENV_ARRAY_ID")) info ~= ["TUTHPC_JOB_ENV_ARRAY_ID",     s];
-        if(auto s = environment.get("TUTHPC_JOB_ENV_TASK_ID"))  info ~= ["TUTHPC_JOB_ENV_TASK_ID",      s];
-        if(auto s = env.get("TUTHPC_JOB_ENV_TASK_ID", null))    info ~= ["TUTHPC_JOB_ENV_TASK_ID",      s];
-        info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
-        //info ~= ["Job size",            taskList.length.to!string];
-        info ~= ["Start time",          startTime.toISOExtString()];
-        info ~= ["End time",            Clock.currTime.toISOExtString()];
-        info ~= ["Host",                Socket.hostName()];
-        info ~= ["Process",             format("%-(%s %)", Runtime.args)];
-        info ~= ["stdout",              pipes.stdout.byLine.join("\n").to!string];
-        info ~= ["stderr",              pipes.stderr.byLine.join("\n").to!string];
+    enforce(status == 0);
+}
 
-        tuthpc.mail.sendMail(
-            jenv.emailAddrs.join(','),
-            "Error on Job %s".format(jobid),
-            "%(%-(%s: \t%)\n%)".format(info)
-        );
+
+void doSingleTask(JobEnvironment jenv, void delegate() task, string[string] debugInfo, string file, size_t line)
+{
+    auto startTime = Clock.currTime;
+    
+    try{
+        task();
+    }catch(Throwable ex){
+        if(jenv.isEnabledEmailOnError){
+            import std.socket;
+            string[2][] info;
+            auto jobid = environment.get("PBS_JOBID", "Unknown");
+            info ~= ["PBS_JOBID",           jobid];
+            info ~= ["FileName",            file];
+            info ~= ["Line",                line.to!string];
+            if(auto s = environment.get("TUTHPC_JOB_ENV_RUN_ID"))   info ~= ["TUTHPC_JOB_ENV_RUN_ID",       s];
+            if(auto s = environment.get("TUTHPC_JOB_ENV_ARRAY_ID")) info ~= ["TUTHPC_JOB_ENV_ARRAY_ID",     s];
+            foreach(k, v; debugInfo) info ~= [k, v];
+            info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
+            info ~= ["Start time",          startTime.toISOExtString()];
+            info ~= ["End time",            Clock.currTime.toISOExtString()];
+            info ~= ["Host",                Socket.hostName()];
+            info ~= ["Process",             format("%-(%s %)", Runtime.args)];
+            info ~= ["ExceptionMsg",        ex.to!string];
+
+            tuthpc.mail.sendMail(
+                jenv.emailAddrs.join(','),
+                "Error on Job %s".format(jobid),
+                "%(%-(%s: \t%)\n%)".format(info)
+            );
+        }
+
+        if((cast(Exception)ex) is null)
+            throw ex;
     }
 }
 
@@ -421,11 +456,11 @@ if(isTaskList!TL)
                 foreach(parallelIndex; iota(env.taskGroupSize).parallel){
                     // このスレッドが担当するタスクはindex + parallelIndex + n * env.maxArraySize * env.taskGroupSize番目
                     for(size_t taskIndex = index + parallelIndex; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize){
-                        spawnSingleTask(
+                        doSingleTask(
                                 env,
-                                format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]),
+                                //() { spawnSingleTask(format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]), ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string], "%sth task".format(taskIndex)); },
+                                (){ taskList[taskIndex](); },
                                 ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string],
-                                "%sth task".format(taskIndex),
                                 file,
                                 line);
                     }
@@ -448,11 +483,11 @@ if(isTaskList!TL)
 
             import std.parallelism;
             foreach(taskIndex; iota(taskList.length).parallel){
-                spawnSingleTask(
+                doSingleTask(
                     env,
-                    format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]),
+                    //() { spawnSingleTask(format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]), ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string], "%sth task".format(taskIndex)); },
+                    (){ taskList[taskIndex](); },
                     ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string],
-                    "%sth task".format(taskIndex),
                     file,
                     line);
             }
