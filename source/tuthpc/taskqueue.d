@@ -334,18 +334,33 @@ void doSingleTask(JobEnvironment jenv, size_t taskIndex, string logdir, string f
     string outname = buildPath(logdir, format("stdout_%s.log", taskIndex));
     string errname = buildPath(logdir, format("stderr_%s.log", taskIndex));
 
-    string cmd = format("%s=%s %s %-('%s'%| %) 1> %s 2> %s",
-        "TUTHPC_JOB_ENV_TASK_ID", taskIndex,
-        Runtime.args[0], Runtime.args[1 .. $],
-        outname, errname);
-
     auto startTime = Clock.currTime;
-    int status = system(cmd.toStringz);
+
+    version(OSX)
+    {
+        auto pipe = pipeProcess(Runtime.args, Redirect.stdout | Redirect.stderr,
+                        ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string]);
+
+        int status = wait(pipe.pid);
+
+        import std.algorithm;
+        pipe.stdout.byChunk(1024).copy(File(outname, "w").lockingTextWriter);
+        pipe.stderr.byChunk(1024).copy(File(errname, "w").lockingTextWriter);
+    }
+    else
+    {
+        string cmd = format("%s=%s %s %-('%s'%| %) 1> %s 2> %s",
+            "TUTHPC_JOB_ENV_TASK_ID", taskIndex,
+            Runtime.args[0], Runtime.args[1 .. $],
+            outname, errname);
+
+        int status = system(cmd.toStringz);
+    }
 
     {
         auto writer = stdout.lockingTextWriter;
         writer.formattedWrite("=========== START OF %sTH TASK. ===========\n", taskIndex);
-        readText(outname).writeln();
+        std.stdio.write(readText(outname));
         writer.formattedWrite("=========== END OF %sTH TASK. (status = %s) ===========\n", taskIndex, status);
     }
 
@@ -500,6 +515,10 @@ if(isTaskList!TL)
             taskList[taskIndex]();
         }else{
             string logdir = format("logs_%s", hashOfExe());
+
+            import std.file;
+            mkdir(logdir);
+
             import std.parallelism;
             foreach(taskIndex; iota(taskList.length).parallel){
                 doSingleTask(env, taskIndex, logdir, file, line);
