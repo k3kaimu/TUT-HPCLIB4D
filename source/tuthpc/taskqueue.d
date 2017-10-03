@@ -299,7 +299,7 @@ struct QueueOverflowProtector
 
             countOfTotalMyJobs += jobSize;
             writefln("ANALYZE: %s jobs are spawned on %s(%s)[%s]", jobSize, file, line, runId);
-            enforce(countOfTotalMyJobs + countOfEnqueuedJobs < 4000,
+            enforce(countOfTotalMyJobs + countOfEnqueuedJobs < 16000,
                 "Your jobs may cause queue overflow. Please use env.maxArraySize.");
         }else{
             if(!alreadySpawnAnalyzer){
