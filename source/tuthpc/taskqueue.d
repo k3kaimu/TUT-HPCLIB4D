@@ -77,6 +77,7 @@ struct JobEnvironment
         if(useArgs){
             import std.getopt;
             auto args = Runtime.args;
+            int walltime_int = -1;
 
             getopt(args,
                 std.getopt.config.passThrough,
@@ -85,7 +86,7 @@ struct JobEnvironment
                 "th:ppn|th:p", &ppn,
                 "th:nodes|th:n", &nodes,
                 "th:taskGroupSize|th:g", &taskGroupSize,
-                "th:walltime|th:w", (string h){ walltime = h.to!uint.hours; },
+                "th:walltime|th:w", &walltime_int,
                 "th:mailOnError|th:me", &isEnabledEmailOnError,
                 "th:mailOnStart|th:ms", &isEnabledEmailOnStart,
                 "th:mailOnFinish|th:mf", &isEnabledEmailOnEnd,
@@ -93,6 +94,9 @@ struct JobEnvironment
                 "th:maxArraySize|th:m", &maxArraySize,
                 "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
             );
+
+            if(walltime_int != -1)
+                walltime = walltime_int.hours;
         }
 
         if(queueName is null) queueName = clusters[cluster].queueName;
