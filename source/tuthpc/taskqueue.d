@@ -66,7 +66,7 @@ struct JobEnvironment
     bool isEnabledEmailOnStart = false; /// 実行開始時にメールで通知するかどうか
     bool isEnabledEmailOnEnd = false;   /// 実行終了時にメールで通知するかどうか
     string[] emailAddrs;                /// メールを送りたい宛先
-    uint maxArraySize = 2048;               /// アレイジョブでの最大のサイズ
+    uint maxArraySize = 8192;           /// アレイジョブでの最大のサイズ
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
 
