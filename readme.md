@@ -94,6 +94,12 @@ MPIはサポートしていません．
     * デフォルト値：`true`
     * アレイジョブにする場合`true`，個別のジョブを入れる場合は`false`を指定します．現在は`false`でもアレイジョブを投入するようになっています．
 
++ `JobEnvironment.useArgs`
+
+    * `bool`
+    * デフォルト値：`true`
+    * `true`の場合，プログラムの実行時引数を利用して`JobEnvironment`型の値を設定します．
+
 + `JobEnvironment.scriptPath`
 
     * `string`
@@ -104,6 +110,7 @@ MPIはサポートしていません．
 
     * `string`
     * デフォルト値：`null`
+    * 実行時引数：`--th:q`, `--th:queue`, (ex. `--th:q=wEduq`)
     * ジョブを投入するキュー名を設定できます．`null`の場合は，自動で研究用キュー`wLrchq`が設定されます．
 
 + `JobEnvironment.unloadModules`
@@ -170,18 +177,21 @@ MPIはサポートしていません．
     
     * `uint`
     * デフォルト値：`0`
+    * 実行時引数：`--th:g`, `--th:taskGroupSize`, (ex. `--th:g=7`)
     * `nodes=1:ppn=1`のとき，複数のタスクをまとめて一つのジョブにして投入します．このとき，ppn値をこの値に設定し，この値の個数だけ並列でタスクを実行します．`nodes=1:ppn=1`で，さらにこの値が`0`のとき，この値は`11`として処理されます．この機能は，アレイジョブのジョブ数削減，及びクラスタ計算機の資源を占有しないために存在しています．クラスタ計算機の資源を占有しないためには，この値を`7`〜`14`程度の値にすることが望ましいです．
 
 + `JobEnvironment.ppn`
 
     * `uint`
     * デフォルト値：`1`
+    * 実行時引数：`--th:p`, `--th:ppn`, (ex. `--th:ppn=2`)
     * 1つのジョブが実行される各ノードで何CPU使用するか指定できます．
 
 + `JobEnvironment.nodes`
 
     * `uint`
     * デフォルト値：`1`
+    * 実行時引数：`--th:n`, `--th:node`, (ex. `--th:node=2`)
     * 1つのジョブを実行するノード数を指定できます．
 
 + `JobEnvironment.mem`, `JobEnvironment.pmem`, `JobEnvironment.vmem`, `JobEnvironment.pvmem`
@@ -190,10 +200,13 @@ MPIはサポートしていません．
     * デフォルト値：`-1`
     * メモリ使用量を設定できます．`-1`のときは設定されません．`0`のときは，ノードのCPU使用率が高くなるように最大メモリ量とppn値から計算されます．
 
-+ `JobEnvironment.isEnabledEmailOnError`, `JobEnvironment.isEnabledEmailOnStart`, `JobEnvironment.isEnabledEmailOnEnd`
++ `JobEnvironment.isEnabledEmailOnError`, `JobEnvironment.isEnabledEmailOnStart`, `JobEnvironment.isEnabledEmailOnFinish`
 
     * `bool`
     * デフォルト値：`false`
+    * 実行時引数(`JobEnvironment.isEnabledEmailOnError`)：`--th:mailOnError`, `--th:me`
+    * 実行時引数(`JobEnvironment.isEnabledEmailOnStart`)：`--th:mailOnStart`, `--th:ms`
+    * 実行時引数(`JobEnvironment.isEnabledEmailOnFinish`)：`--th:mailOnFinish`, `--th:mf`
     * ジョブのエラー時，実行開始時，実行終了時にメールを送るかどうか設定できます．
 
 + `JobEnvironment.emailAddrs`
@@ -205,11 +218,11 @@ MPIはサポートしていません．
 + `JobEnvironment.maxArraySize`
 
     * `uint`
-    * デフォルト値: `2048`
+    * デフォルト値: `8192`
     * アレイジョブにおける最大のジョブ数を指定します．この数以上のジョブを投入しようとしたとき，1つのジョブで複数のタスクを実行することで，自動的にジョブ数がこの値に収まるように調整されます．
 
 + `JobEnvironment.isEnabledQueueOverflowProtection`
 
     * `bool`
     * デフォルト値：`true`
-    * クラスタのキューには4096個以上のジョブを管理できない制限があります．この制限を超えてジョブを投げることがないように，ジョブ投入の前にチェックするかどうかを指定できます．デフォルト値ではチェックします．
+    * クラスタのキューには16384個以上のジョブを管理できない制限があります．この制限を超えてジョブを投げることがないように，ジョブ投入の前にチェックするかどうかを指定できます．デフォルト値ではチェックします．
