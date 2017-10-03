@@ -40,6 +40,7 @@ enum DependencySetting
 struct JobEnvironment
 {
     bool useArrayJob = true;    /// ArrayJobにするかどうか
+    bool useArgs = true;
     string scriptPath;          /// スクリプトファイルの保存場所, nullならパイプでqsubにジョブを送る
     string queueName;           /// nullのとき，自動でclusters[cluster].queueNameに設定される
     string dependentJob;        /// 依存しているジョブのID
@@ -73,24 +74,26 @@ struct JobEnvironment
 
     void applyDefaults(Cluster cluster)
     {
-        import std.getopt;
+        if(useArgs){
+            import std.getopt;
+            auto args = Runtime.args;
 
-        auto args = Runtime.args;
-        getopt(args,
-            std.getopt.config.passThrough,
-            "th:queue|th:q", &queueName,
-            "th:after|th:a", &dependentJob,
-            "th:ppn|th:p", &ppn,
-            "th:nodes|th:n", &nodes,
-            "th:taskGroupSize|th:g", &taskGroupSize,
-            "th:walltime|th:w", (string h){ walltime = h.to!uint.hours; },
-            "th:mailOnError|th:me", &isEnabledEmailOnError,
-            "th:mailOnStart|th:ms", &isEnabledEmailOnStart,
-            "th:mailOnFinish|th:mf", &isEnabledEmailOnEnd,
-            "th:mailTo", &emailAddrs,
-            "th:maxArraySize|th:m", &maxArraySize,
-            "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
-        );
+            getopt(args,
+                std.getopt.config.passThrough,
+                "th:queue|th:q", &queueName,
+                "th:after|th:a", &dependentJob,
+                "th:ppn|th:p", &ppn,
+                "th:nodes|th:n", &nodes,
+                "th:taskGroupSize|th:g", &taskGroupSize,
+                "th:walltime|th:w", (string h){ walltime = h.to!uint.hours; },
+                "th:mailOnError|th:me", &isEnabledEmailOnError,
+                "th:mailOnStart|th:ms", &isEnabledEmailOnStart,
+                "th:mailOnFinish|th:mf", &isEnabledEmailOnEnd,
+                "th:mailTo", &emailAddrs,
+                "th:maxArraySize|th:m", &maxArraySize,
+                "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
+            );
+        }
 
         if(queueName is null) queueName = clusters[cluster].queueName;
         if(ppn == 0) ppn = clusters[cluster].maxPPN;
