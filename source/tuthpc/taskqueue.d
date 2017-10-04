@@ -331,38 +331,113 @@ string logDirName(string jobid)
 }
 
 
-void doSingleTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
+//void doSingleTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
+//{
+//    import core.stdc.stdlib;
+//    import std.file;
+//    import std.string;
+//    import std.path;
+
+//    string outname = buildPath(logdir, format("stdout_%s.log", taskIndex));
+//    string errname = buildPath(logdir, format("stderr_%s.log", taskIndex));
+
+//    auto startTime = Clock.currTime;
+
+//    version(OSX)
+//    {
+//        auto pipe = pipeProcess(Runtime.args, Redirect.stdout | Redirect.stderr,
+//                        ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string]);
+
+//        int status = wait(pipe.pid);
+
+//        import std.algorithm;
+//        pipe.stdout.byChunk(1024).copy(File(outname, "w").lockingTextWriter);
+//        pipe.stderr.byChunk(1024).copy(File(errname, "w").lockingTextWriter);
+//    }
+//    else
+//    {
+//        string cmd = format("%s=%s %s %-('%s'%| %) 1> %s 2> %s",
+//            "TUTHPC_JOB_ENV_TASK_ID", taskIndex,
+//            Runtime.args[0], Runtime.args[1 .. $],
+//            outname, errname);
+
+//        int status = system(cmd.toStringz);
+//    }
+
+//    {
+//        auto writer = stdout.lockingTextWriter;
+//        writer.formattedWrite("=========== START OF %sTH TASK. ===========\n", taskIndex);
+//        std.stdio.write(readText(outname));
+//        writer.formattedWrite("=========== END OF %sTH TASK. (status = %s) ===========\n", taskIndex, status);
+//    }
+
+//    {
+//        File log = File(errname, "r");
+//        auto writer = stderr.lockingTextWriter;
+//        bool bFirst = true;
+//        foreach(str; log.byLine){
+//            if(bFirst){
+//                writer.formattedWrite("=========== START OF %sTH TASK. ===========\n", taskIndex);
+//                bFirst = false;
+//            }
+//            writer.put(str);
+//            writer.put('\n');
+//        }
+
+//        if(!bFirst){
+//            writer.formattedWrite("=========== END OF %sTH TASK. (status = %s) ===========\n", taskIndex, status);
+//        }
+//    }
+
+//    if(status != 0 && jenv.isEnabledEmailOnError){
+//        import std.socket;
+//        string[2][] info;
+//        auto jobid = environment.get("PBS_JOBID", "Unknown");
+//        info ~= ["PBS_JOBID",           jobid];
+//        info ~= ["FileName",            file];
+//        info ~= ["Line",                line.to!string];
+//        if(auto s = environment.get("TUTHPC_JOB_ENV_RUN_ID"))   info ~= ["TUTHPC_JOB_ENV_RUN_ID",       s];
+//        if(auto s = environment.get("TUTHPC_JOB_ENV_ARRAY_ID")) info ~= ["TUTHPC_JOB_ENV_ARRAY_ID",     s];
+//        if(auto s = environment.get("TUTHPC_JOB_ENV_TASK_ID"))  info ~= ["TUTHPC_JOB_ENV_TASK_ID",      s];
+//        info ~= ["TUTHPC_JOB_ENV_TASK_ID",      taskIndex.to!string];
+//        info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
+//        //info ~= ["Job size",            taskList.length.to!string];
+//        info ~= ["Start time",          startTime.toISOExtString()];
+//        info ~= ["End time",            Clock.currTime.toISOExtString()];
+//        info ~= ["Host",                Socket.hostName()];
+//        info ~= ["Process",             format("%-(%s %)", Runtime.args)];
+//        info ~= ["stdout",              readText(outname)];
+//        info ~= ["stderr",              readText(errname)];
+
+//        tuthpc.mail.sendMail(
+//            jenv.emailAddrs.join(','),
+//            "Error on Job %s".format(jobid),
+//            "%(%-(%s: \t%)\n%)".format(info)
+//        );
+//    }
+//}
+
+
+Pid spawnTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
 {
-    import core.stdc.stdlib;
-    import std.file;
-    import std.string;
     import std.path;
 
     string outname = buildPath(logdir, format("stdout_%s.log", taskIndex));
     string errname = buildPath(logdir, format("stderr_%s.log", taskIndex));
 
-    auto startTime = Clock.currTime;
+    auto pid = spawnProcess(Runtime.args, std.stdio.stdin, File(outname, "w"), File(errname, "w"), ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string]);
+    return pid;
+}
 
-    version(OSX)
-    {
-        auto pipe = pipeProcess(Runtime.args, Redirect.stdout | Redirect.stderr,
-                        ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string]);
 
-        int status = wait(pipe.pid);
+void loggingTask(int status, JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
+{
+    import std.path;
+    import std.stdio;
+    import std.file;
 
-        import std.algorithm;
-        pipe.stdout.byChunk(1024).copy(File(outname, "w").lockingTextWriter);
-        pipe.stderr.byChunk(1024).copy(File(errname, "w").lockingTextWriter);
-    }
-    else
-    {
-        string cmd = format("%s=%s %s %-('%s'%| %) 1> %s 2> %s",
-            "TUTHPC_JOB_ENV_TASK_ID", taskIndex,
-            Runtime.args[0], Runtime.args[1 .. $],
-            outname, errname);
-
-        int status = system(cmd.toStringz);
-    }
+    string outname = buildPath(logdir, format("stdout_%s.log", taskIndex));
+    string errname = buildPath(logdir, format("stderr_%s.log", taskIndex));
 
     {
         auto writer = stdout.lockingTextWriter;
@@ -402,7 +477,7 @@ void doSingleTask(JobEnvironment jenv, size_t taskIndex, string logdir, string f
         info ~= ["TUTHPC_JOB_ENV_TASK_ID",      taskIndex.to!string];
         info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
         //info ~= ["Job size",            taskList.length.to!string];
-        info ~= ["Start time",          startTime.toISOExtString()];
+        //info ~= ["Start time",          startTime.toISOExtString()];
         info ~= ["End time",            Clock.currTime.toISOExtString()];
         info ~= ["Host",                Socket.hostName()];
         info ~= ["Process",             format("%-(%s %)", Runtime.args)];
@@ -414,6 +489,48 @@ void doSingleTask(JobEnvironment jenv, size_t taskIndex, string logdir, string f
             "Error on Job %s".format(jobid),
             "%(%-(%s: \t%)\n%)".format(info)
         );
+    }
+}
+
+
+void processTasks(R, TL)(JobEnvironment jenv, R taskIndxs, TL taskList, string logdir, string file, size_t line)
+{
+    import std.path;
+    import std.process;
+    import std.file;
+
+    if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
+        immutable size_t taskIndex = strOfTaskID.to!size_t();
+        taskList[taskIndex]();
+    }else{
+        if(!exists(logdir))
+            mkdir(logdir);
+
+        static struct ProcessState
+        {
+            Pid pid;
+            size_t taskIndex;
+        }
+
+        ProcessState*[] procList = new ProcessState*[](jenv.taskGroupSize);
+        while(!(taskIndxs.empty && procList.all!"a is null"))
+        {
+            foreach(ref proc; procList) {
+                if(proc is null && !taskIndxs.empty) {
+                    immutable size_t taskIndex = taskIndxs.front;
+                    taskIndxs.popFront();
+                    proc = new ProcessState(spawnTask(jenv, taskIndex, logdir, file, line), taskIndex);
+                }
+
+                if(proc !is null) {
+                    auto status = tryWait(proc.pid);
+                    if(status.terminated) {
+                        loggingTask(status.status, jenv, proc.taskIndex, logdir, file, line);
+                        proc = null;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -490,24 +607,34 @@ if(isTaskList!TL)
 
             index *= env.taskGroupSize;
 
-            if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
-                // 環境変数で指定されたタスクを実行する
-                immutable size_t taskIndex = strOfTaskID.to!size_t();
-                taskList[taskIndex]();
-            }else{
-                // 担当するタスクを実行する
-                import std.parallelism;
+            size_t[] taskIndexList;
+            foreach(p; 0 .. env.taskGroupSize)
+                for(size_t taskIndex = index + p; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize)
+                    taskIndexList ~= taskIndex;
 
-                string logdir = logDirName(environment.get("PBS_JOBID"));
+            string logdir = logDirName(environment.get("PBS_JOBID"));
+            processTasks(env, taskIndexList, taskList, logdir, file, line);
 
-                // taskGroupSizeで並列化する
-                foreach(parallelIndex; iota(env.taskGroupSize).parallel){
-                    // このスレッドが担当するタスクはindex + parallelIndex + n * env.maxArraySize * env.taskGroupSize番目
-                    for(size_t taskIndex = index + parallelIndex; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize){
-                        doSingleTask(env, taskIndex, logdir, file, line);
-                    }
-                }
-            }
+            //if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
+            //    // 環境変数で指定されたタスクを実行する
+            //    immutable size_t taskIndex = strOfTaskID.to!size_t();
+            //    taskList[taskIndex]();
+            //}else{
+            //    // 担当するタスクを実行する
+            //    import std.parallelism;
+
+            //    string logdir = logDirName(environment.get("PBS_JOBID"));
+
+            //    // taskGroupSizeで並列化する
+            //    foreach(parallelIndex; iota(env.taskGroupSize).parallel){
+            //        // このスレッドが担当するタスクはindex + parallelIndex + n * env.maxArraySize * env.taskGroupSize番目
+            //        for(size_t taskIndex = index + parallelIndex; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize){
+            //            doSingleTask(env, taskIndex, logdir, file, line);
+            //        }
+            //    }
+            //}
+
+
         }
     }
     else if(nowInRunOld == true)
@@ -517,20 +644,24 @@ if(isTaskList!TL)
     }
     else
     {
-        if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
-            immutable size_t taskIndex = strOfTaskID.to!size_t();
-            taskList[taskIndex]();
-        }else{
-            string logdir = format("logs_%s", hashOfExe());
+        string logdir = format("logs_%s", hashOfExe());
 
-            import std.file;
-            mkdir(logdir);
+        processTasks(env, iota(taskList.length), taskList, logdir, file, line);
 
-            import std.parallelism;
-            foreach(taskIndex; iota(taskList.length).parallel){
-                doSingleTask(env, taskIndex, logdir, file, line);
-            }
-        }
+        //if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
+        //    immutable size_t taskIndex = strOfTaskID.to!size_t();
+        //    taskList[taskIndex]();
+        //}else{
+        //    string logdir = format("logs_%s", hashOfExe());
+
+        //    import std.file;
+        //    mkdir(logdir);
+
+        //    import std.parallelism;
+        //    foreach(taskIndex; iota(taskList.length).parallel){
+        //        doSingleTask(env, taskIndex, logdir, file, line);
+        //    }
+        //}
     }
 
   Lreturn:
