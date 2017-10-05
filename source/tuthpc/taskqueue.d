@@ -421,7 +421,7 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
     import std.process;
     import std.file;
 
-    if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID_ID")){
+    if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
         immutable size_t taskIndex = strOfTaskID.to!size_t();
 
         import core.thread;
@@ -566,6 +566,8 @@ if(isTaskList!TL)
     }
     else
     {
+        import std.parallelism;
+
         string logdir = format("logs_%s", hashOfExe());
 
         processTasks(env, std.parallelism.totalCPUs, iota(taskList.length), taskList, logdir, file, line);
