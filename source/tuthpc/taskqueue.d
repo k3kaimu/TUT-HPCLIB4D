@@ -6,6 +6,7 @@ import tuthpc.mail;
 import tuthpc.hosts;
 import tuthpc.constant;
 public import tuthpc.tasklist;
+import tuthpc.limiter;
 
 import std.algorithm;
 import std.range;
@@ -19,6 +20,15 @@ import std.traits;
 import std.functional;
 import std.datetime;
 import std.path;
+
+
+enum EnvironmentKey : string
+{
+    RUN_ID = "TUTHPC_JOB_ENV_RUN_ID",
+    ARRAY_ID = "TUTHPC_JOB_ENV_ARRAY_ID",
+    TASK_ID = "TUTHPC_JOB_ENV_TASK_ID",
+    PBS_JOBID = "PBS_JOBID",
+}
 
 
 string hashOfExe()
@@ -79,6 +89,7 @@ struct JobEnvironment
     uint maxArraySize = 8192;           /// アレイジョブでの最大のサイズ
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
+    size_t totalProcessNum = 30;
 
 
     void applyDefaults(Cluster cluster)
@@ -102,6 +113,7 @@ struct JobEnvironment
                 "th:mailTo", &emailAddrs,
                 "th:maxArraySize|th:m", &maxArraySize,
                 "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
+                "th:maxProcessNum|th:plim", &totalProcessNum,
             );
 
             if(walltime_int != -1)
@@ -344,10 +356,12 @@ Pid spawnTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file,
 {
     import std.path;
 
+    enforce(numOfProcessOfUser() <= jenv.totalProcessNum, "Many processes are spawned.");
+
     string outname = buildPath(logdir, format("stdout_%s.log", taskIndex));
     string errname = buildPath(logdir, format("stderr_%s.log", taskIndex));
 
-    auto pid = spawnProcess(Runtime.args, std.stdio.stdin, File(outname, "w"), File(errname, "w"), ["TUTHPC_JOB_ENV_TASK_ID" : taskIndex.to!string]);
+    auto pid = spawnProcess(Runtime.args, std.stdio.stdin, File(outname, "w"), File(errname, "w"), [EnvironmentKey.TASK_ID : taskIndex.to!string]);
     return pid;
 }
 
@@ -389,13 +403,13 @@ void loggingTask(int status, JobEnvironment jenv, size_t taskIndex, string logdi
     if(status != 0 && jenv.isEnabledEmailOnError){
         import std.socket;
         string[2][] info;
-        auto jobid = environment.get("PBS_JOBID", "Unknown");
+        auto jobid = environment.get(EnvironmentKey.PBS_JOBID, "Unknown");
         info ~= ["PBS_JOBID",           jobid];
         info ~= ["FileName",            file];
         info ~= ["Line",                line.to!string];
-        if(auto s = environment.get("TUTHPC_JOB_ENV_RUN_ID"))   info ~= ["TUTHPC_JOB_ENV_RUN_ID",       s];
-        if(auto s = environment.get("TUTHPC_JOB_ENV_ARRAY_ID")) info ~= ["TUTHPC_JOB_ENV_ARRAY_ID",     s];
-        if(auto s = environment.get("TUTHPC_JOB_ENV_TASK_ID"))  info ~= ["TUTHPC_JOB_ENV_TASK_ID",      s];
+        if(auto s = environment.get(EnvironmentKey.RUN_ID))   info ~= [EnvironmentKey.RUN_ID,       s];
+        if(auto s = environment.get(EnvironmentKey.ARRAY_ID)) info ~= [EnvironmentKey.ARRAY_ID,     s];
+        if(auto s = environment.get(EnvironmentKey.TASK_ID))  info ~= [EnvironmentKey.TASK_ID,      s];
         info ~= ["TUTHPC_JOB_ENV_TASK_ID",      taskIndex.to!string];
         info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
         //info ~= ["Job size",            taskList.length.to!string];
@@ -421,7 +435,7 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
     import std.process;
     import std.file;
 
-    if(auto strOfTaskID = environment.get("TUTHPC_JOB_ENV_TASK_ID")){
+    if(auto strOfTaskID = environment.get(EnvironmentKey.TASK_ID)){
         immutable size_t taskIndex = strOfTaskID.to!size_t();
 
         import core.thread;
@@ -453,6 +467,10 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
         }
 
         ProcessState*[] procList = new ProcessState*[](parallelSize);
+        scope(failure){
+            procList.filter!"a".each!(a => std.process.kill(a.pid));
+        }
+
         while(!(taskIndxs.empty && procList.all!"a is null"))
         {
             foreach(ref proc; procList) {
@@ -540,12 +558,12 @@ if(isTaskList!TL)
     else if(nowRunningOnClusterComputingNode() && nowInRunOld == false)
     {
         enforce(
-                environment.get("TUTHPC_JOB_ENV_RUN_ID")
-             && environment.get("TUTHPC_JOB_ENV_ARRAY_ID"), "cannot find environment variables: 'TUTHPC_JOB_ENV_RUN_ID', and 'TUTHPC_JOB_ENV_ARRAY_ID'");
+                environment.get(EnvironmentKey.RUN_ID)
+             && environment.get(EnvironmentKey.ARRAY_ID), "cannot find environment variables: 'TUTHPC_JOB_ENV_RUN_ID', and 'TUTHPC_JOB_ENV_ARRAY_ID'");
 
-        if(environment["TUTHPC_JOB_ENV_RUN_ID"].to!size_t == RunState.countOfCallRun)
+        if(environment[EnvironmentKey.RUN_ID].to!size_t == RunState.countOfCallRun)
         {
-            size_t index = environment["TUTHPC_JOB_ENV_ARRAY_ID"].to!size_t();
+            size_t index = environment[EnvironmentKey.ARRAY_ID].to!size_t();
             enforce(index < arrayJobSize);
 
             index *= env.taskGroupSize;
@@ -555,7 +573,7 @@ if(isTaskList!TL)
                 for(size_t taskIndex = index + p; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize)
                     taskIndexList ~= taskIndex;
 
-            string logdir = logDirName(environment.get("PBS_JOBID"));
+            string logdir = logDirName(environment.get(EnvironmentKey.PBS_JOBID));
             processTasks(env, env.taskGroupSize, taskIndexList, taskList, logdir, file, line);
         }
     }
@@ -581,8 +599,8 @@ if(isTaskList!TL)
 private
 PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment env, Cluster cluster, string file, size_t line)
 {
-    env.envs["TUTHPC_JOB_ENV_RUN_ID"] = runId;
-    env.envs["TUTHPC_JOB_ENV_ARRAY_ID"] = "${PBS_ARRAYID}";
+    env.envs[EnvironmentKey.RUN_ID] = runId;
+    env.envs[EnvironmentKey.ARRAY_ID] = "${PBS_ARRAYID}";
 
     string dstJobId;
 
