@@ -41,8 +41,9 @@ string hashOfExe()
 
 string lockFileNameForLimitProcess()
 {
-    if("PBS_JOBID" in environment && "PBS_ARRAYID" in environment)
-        return format("%s_%s", environment["PBS_JOBID"], environment["PBS_ARRAYID"]);
+    auto envs = environment.toAA();
+    if("PBS_JOBID" in envs && "PBS_ARRAYID" in envs)
+        return format("%s_%s", envs["PBS_JOBID"], envs["PBS_ARRAYID"]);
     else
         return hashOfExe();
 }
@@ -444,22 +445,7 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
 
         taskList[taskIndex]();
     }else{
-        if(!exists(logdir))
-            mkdir(logdir);
-
-        string lockdir = buildPath(logdir, "lock");
-        if(!exists(lockdir))
-            mkdir(lockdir);
-
-        immutable lockfilename = buildPath(lockdir, lockFileNameForLimitProcess());
-        File lockfile = File(lockfilename, "a");
-        enforce(lockfile.tryLock(), "Another process has been spawned as a manager process already.");
-
-        scope(exit){
-            lockfile.unlock();
-            std.file.remove(lockfilename);
-        }
-
+        enforce(exists(logdir));
 
         static struct ProcessState
         {
@@ -542,14 +528,14 @@ if(isTaskList!TL)
                 goto Lreturn;
         }
 
+        import std.file : mkdir;
+        mkdir(logDirName(result.jobId));
+
         // ジョブを投げる
         result = pushArrayJobToQueue(
             RunState.countOfCallRun.to!string,
             arrayJobSize, env, cluster,
             file, line);
-
-        import std.file : mkdir;
-        mkdir(logDirName(result.jobId));
 
         writeln("ID: ", result.jobId);
         writefln("\ttaskList.length: %s", taskList.length);
@@ -586,8 +572,10 @@ if(isTaskList!TL)
     else
     {
         import std.parallelism;
+        import std.file : exists, mkdir;
 
         string logdir = format("logs_%s", hashOfExe());
+        if(!exists(logdir)) mkdir(logdir);
 
         processTasks(env, std.parallelism.totalCPUs, iota(taskList.length), taskList, logdir, file, line);
     }
