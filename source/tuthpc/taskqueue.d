@@ -347,9 +347,7 @@ struct QueueOverflowProtector
 
 string logDirName(string jobid)
 {
-    import std.ascii;
-
-    return format("logs_%s", jobid.until!(a => !a.isDigit).to!string);
+    return format("logs_%s", hashOfExe());
 }
 
 
