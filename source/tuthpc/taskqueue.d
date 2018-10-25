@@ -74,7 +74,6 @@ struct JobEnvironment
     string[] prescript;         /// プログラム実行前に実行されるシェルスクリプト
     string[] jobScript;         /// ジョブスクリプト
     string[] postscript;        /// プログラム実行後に実行されるシェルスクリプト
-    bool isEnabledTimeCommand = false;  /// timeコマンドをつけるかどうか
     uint taskGroupSize = 0;  /// nodes=1:ppn=1のとき，ppn=<taskGroupSize>で投入し，並列実行します
     uint ppn = 1;               /// 各ノードで何個のプロセッサを使用するか
     uint nodes = 1;             /// 1つのジョブあたりで実行するノード数
@@ -181,9 +180,6 @@ struct JobEnvironment
             }
 
             jobScript = [format("%s %-('%s'%| %)", (bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName, Runtime.args[1 .. $])];
-
-            if(isEnabledTimeCommand)
-                jobScript[0] = "time " ~ jobScript[0];
 
             if(isEnabledEmailOnError){
                 if(environment.get("MAILGUN_APIKEY")
