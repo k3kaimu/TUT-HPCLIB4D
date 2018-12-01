@@ -89,7 +89,7 @@ struct JobEnvironment
     uint maxArraySize = 8192;           /// アレイジョブでの最大のサイズ
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
-    size_t totalProcessNum = 30;
+    size_t totalProcessNum = 50;
 
 
     void applyDefaults(Cluster cluster)
