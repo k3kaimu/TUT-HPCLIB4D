@@ -341,9 +341,9 @@ struct QueueOverflowProtector
 }
 
 
-string logDirName(string jobid)
+string logDirName(size_t runId)
 {
-    return format("logs_%s", hashOfExe());
+    return format("logs_%s_%s", hashOfExe(), runId);
 }
 
 
@@ -523,7 +523,7 @@ if(isTaskList!TL)
         }
 
         import std.file : mkdir;
-        mkdir(logDirName(result.jobId));
+        mkdir(logDirName(RunState.countOfCallRun));
 
         // ジョブを投げる
         result = pushArrayJobToQueue(
@@ -534,7 +534,7 @@ if(isTaskList!TL)
         writeln("ID: ", result.jobId);
         writefln("\ttaskList.length: %s", taskList.length);
         writefln("\tArray Job Size: %s", arrayJobSize);
-        writefln("\tLog directory: %s", logDirName(result.jobId));
+        writefln("\tLog directory: %s", logDirName(RunState.countOfCallRun));
     }
     else if(nowRunningOnClusterComputingNode() && nowInRunOld == false)
     {
@@ -554,7 +554,7 @@ if(isTaskList!TL)
                 for(size_t taskIndex = index + p; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize)
                     taskIndexList ~= taskIndex;
 
-            string logdir = logDirName(environment.get(EnvironmentKey.PBS_JOBID));
+            string logdir = logDirName(RunState.countOfCallRun);
             processTasks(env, env.taskGroupSize, taskIndexList, taskList, logdir, file, line);
         }
     }
