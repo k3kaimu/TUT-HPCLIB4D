@@ -571,12 +571,7 @@ if(isTaskList!TL)
         string logdir = logDirName(RunState.countOfCallRun);
         if(!exists(logdir)) mkdir(logdir);
 
-        uint parallelSize = 1;
-        if(env.ppn == 1)
-            parallelSize = std.parallelism.totalCPUs;
-        else
-            parallelSize = 1;
-
+        uint parallelSize = std.parallelism.totalCPUs / env.ppn;
         TaskPool pool = new TaskPool(parallelSize-1);
         scope(exit) pool.finish();
 
