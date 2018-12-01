@@ -568,10 +568,20 @@ if(isTaskList!TL)
         import std.parallelism;
         import std.file : exists, mkdir;
 
-        string logdir = format("logs_%s", hashOfExe());
+        string logdir = logDirName(RunState.countOfCallRun);
         if(!exists(logdir)) mkdir(logdir);
 
-        processTasks(env, std.parallelism.totalCPUs, iota(taskList.length), taskList, logdir, file, line);
+        uint parallelSize = 1;
+        if(env.ppn == 1)
+            parallelSize = std.parallelism.totalCPUs;
+        else
+            parallelSize = 1;
+
+        TaskPool pool = new TaskPool(parallelSize-1);
+        scope(exit) pool.finish();
+
+        foreach(i; pool.parallel(iota(taskList.length)))
+            taskList[i]();
     }
 
   Lreturn:
