@@ -347,7 +347,7 @@ string logDirName(size_t runId)
 }
 
 
-Pid spawnTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
+Pid spawnTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line, string[string] addEnvs = null)
 {
     import std.path;
 
@@ -357,7 +357,10 @@ Pid spawnTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file,
     string outname = buildPath(logdir, format("stdout_%s.log", taskIndex));
     string errname = buildPath(logdir, format("stderr_%s.log", taskIndex));
 
-    auto pid = spawnProcess(Runtime.args, std.stdio.stdin, File(outname, "w"), File(errname, "w"), [EnvironmentKey.TASK_ID : taskIndex.to!string]);
+    string[string] env = [EnvironmentKey.TASK_ID : taskIndex.to!string];
+    foreach(k, v; addEnvs) env[k] = v;
+
+    auto pid = spawnProcess(Runtime.args, std.stdio.stdin, File(outname, "w"), File(errname, "w"), env);
     return pid;
 }
 
@@ -425,7 +428,7 @@ void loggingTask(int status, JobEnvironment jenv, size_t taskIndex, string logdi
 }
 
 
-void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL taskList, string logdir, string file, size_t line)
+void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL taskList, string logdir, string file, size_t line, string[string] addEnvs = null)
 {
     import std.path;
     import std.process;
@@ -434,8 +437,14 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
     if(auto strOfTaskID = environment.get(EnvironmentKey.TASK_ID)){
         immutable size_t taskIndex = strOfTaskID.to!size_t();
 
+        enforce(environment.get(EnvironmentKey.RUN_ID, "-1").to!long == RunState.countOfCallRun);
+
         import core.thread;
-        Thread.getThis.priority = Thread.PRIORITY_MIN;
+        try {   // 環境によっては失敗する可能性がある（WSL上のUbuntuでは例外送出）
+            Thread.getThis.priority = Thread.PRIORITY_MIN;
+        } catch(core.thread.ThreadException ex){
+            //stderr.writeln(ex);
+        }
 
         taskList[taskIndex]();
     }else{
@@ -458,7 +467,7 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
                 if(proc is null && !taskIndxs.empty) {
                     immutable size_t taskIndex = taskIndxs.front;
                     taskIndxs.popFront();
-                    proc = new ProcessState(spawnTask(jenv, taskIndex, logdir, file, line), taskIndex);
+                    proc = new ProcessState(spawnTask(jenv, taskIndex, logdir, file, line, addEnvs), taskIndex);
                 }
 
                 if(proc !is null) {
@@ -566,17 +575,20 @@ if(isTaskList!TL)
     else
     {
         import std.parallelism;
-        import std.file : exists, mkdir;
+
+        // Task実行プロセスかどうかチェック
+        if(EnvironmentKey.RUN_ID in environment){
+            // 別のrunのために起動されたプロセスなら即時終了
+            if(environment[EnvironmentKey.RUN_ID].to!size_t != RunState.countOfCallRun) goto Lreturn;
+        }else{
+            // Task実行プロセスで必要なため，管理するプロセスでは予めログ用のディレクトリを作っておく
+            import std.file : mkdir;
+            mkdir(logDirName(RunState.countOfCallRun));
+        }
 
         string logdir = logDirName(RunState.countOfCallRun);
-        if(!exists(logdir)) mkdir(logdir);
-
         uint parallelSize = std.parallelism.totalCPUs / env.ppn;
-        TaskPool pool = new TaskPool(parallelSize-1);
-        scope(exit) pool.finish();
-
-        foreach(i; pool.parallel(iota(taskList.length)))
-            taskList[i]();
+        processTasks(env, parallelSize, iota(taskList.length), taskList, logdir, file, line, [EnvironmentKey.RUN_ID : RunState.countOfCallRun.to!string]);
     }
 
   Lreturn:
