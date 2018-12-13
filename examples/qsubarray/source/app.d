@@ -9,12 +9,33 @@ import std.range;
 
 immutable CMD_HEADER = "TUTHPCLIB4D:";
 
+
+void printUsage()
+{
+    writeln(strUsage);
+}
+
+
 void main(string[] args)
 {
-    // "-"が頭についている引数は無視する
+    JobEnvironment env;
+
+    if(args.length == 1) {
+        printUsage();
+        return;
+    }
+
+    // プログラム名を無視
     args = args[1 .. $];
+
+    // "-"が頭についている引数は無視する
     while(args.length && args[0].startsWith("-"))
         args = args[1 .. $];
+
+    if(args.length == 0) {
+        printUsage();
+        return;
+    }
 
     // プログラムを起動
     auto pipes = pipeProcess(args);
@@ -30,7 +51,7 @@ void main(string[] args)
                     writeln("Waiting...");
                     wait(pipes.pid);
                     writeln("Submit!");
-                    submitToQueue(args, cmdargs[1].to!uint);
+                    submitToQueue(env, args, cmdargs[1].to!uint);
                     break;
                 default:
                     throw new Exception("Unsupported command: %s".format(cmdargs[0]));
@@ -41,9 +62,13 @@ void main(string[] args)
 
 
 
-void submitToQueue(string[] args, uint len)
+void submitToQueue(JobEnvironment env, string[] args, uint len)
 {
-    foreach(i; iota(len).runAsTasks) {
+    import std.datetime : Clock;
+    env.isEnabledRenameExeFile = false;
+    env.logdir = format("logs_%s", Clock.currTime.toISOString());
+
+    foreach(i; iota(len).runAsTasks(env)) {
         auto p = pipe();
         auto pid = spawnProcess(args, p.readEnd);
         p.writeEnd.writeln(i);
@@ -52,3 +77,15 @@ void submitToQueue(string[] args, uint len)
     }
 }
 
+
+immutable string strUsage = `
+Usage:
+    qsubarray <options...> <commands...>
+
+Where:
+    <options...>:   list of options for qsubarray
+    <commands...>:  commands
+
+For example:
+    qsubarray --th:g=20 --th:m=4 python script.py
+`;
