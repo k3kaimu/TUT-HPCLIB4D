@@ -90,6 +90,7 @@ struct JobEnvironment
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
     size_t totalProcessNum = 50;
+    string logdir;              /// 各タスクの標準出力，標準エラーを保存するディレクトリを指定できる
 
 
     void applyDefaults(Cluster cluster)
@@ -114,6 +115,7 @@ struct JobEnvironment
                 "th:maxArraySize|th:m", &maxArraySize,
                 "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
                 "th:maxProcessNum|th:plim", &totalProcessNum,
+                "th:logdir", &logdir
             );
 
             if(walltime_int != -1)
@@ -341,9 +343,12 @@ struct QueueOverflowProtector
 }
 
 
-string logDirName(size_t runId)
+string logDirName(in JobEnvironment env, size_t runId)
 {
-    return format("logs_%s_%s", hashOfExe(), runId);
+    if(env.logdir.length != 0)
+        return env.logdir;
+    else
+        return format("logs_%s_%s", hashOfExe(), runId);
 }
 
 
@@ -519,6 +524,8 @@ if(isTaskList!TL)
     if(arrayJobSize > env.maxArraySize)
         arrayJobSize = env.maxArraySize;
 
+    immutable logdir = logDirName(env, RunState.countOfCallRun);
+
     if(nowRunningOnClusterDevelopmentHost())
     {
         enforce(nowInRunOld == false);
@@ -532,7 +539,7 @@ if(isTaskList!TL)
         }
 
         import std.file : mkdir;
-        mkdir(logDirName(RunState.countOfCallRun));
+        mkdir(logdir);
 
         // ジョブを投げる
         result = pushArrayJobToQueue(
@@ -543,7 +550,7 @@ if(isTaskList!TL)
         writeln("ID: ", result.jobId);
         writefln("\ttaskList.length: %s", taskList.length);
         writefln("\tArray Job Size: %s", arrayJobSize);
-        writefln("\tLog directory: %s", logDirName(RunState.countOfCallRun));
+        writefln("\tLog directory: %s", logdir);
     }
     else if(nowRunningOnClusterComputingNode() && nowInRunOld == false)
     {
@@ -563,7 +570,6 @@ if(isTaskList!TL)
                 for(size_t taskIndex = index + p; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize)
                     taskIndexList ~= taskIndex;
 
-            string logdir = logDirName(RunState.countOfCallRun);
             processTasks(env, env.taskGroupSize, taskIndexList, taskList, logdir, file, line);
         }
     }
@@ -583,10 +589,9 @@ if(isTaskList!TL)
         }else{
             // Task実行プロセスで必要なため，管理するプロセスでは予めログ用のディレクトリを作っておく
             import std.file : mkdir;
-            mkdir(logDirName(RunState.countOfCallRun));
+            mkdir(logdir);
         }
 
-        string logdir = logDirName(RunState.countOfCallRun);
         uint parallelSize = std.parallelism.totalCPUs / env.ppn;
         processTasks(env, parallelSize, iota(taskList.length), taskList, logdir, file, line, [EnvironmentKey.RUN_ID : RunState.countOfCallRun.to!string]);
     }
