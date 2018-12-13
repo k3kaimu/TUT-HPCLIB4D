@@ -1,5 +1,4 @@
-
-
+# ./qsubarray --th:logdir=logs_python_foo python test.py
 taskList = []
 
 def func(i):
