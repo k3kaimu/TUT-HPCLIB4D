@@ -28,6 +28,7 @@ enum EnvironmentKey : string
     ARRAY_ID = "TUTHPC_JOB_ENV_ARRAY_ID",
     TASK_ID = "TUTHPC_JOB_ENV_TASK_ID",
     PBS_JOBID = "PBS_JOBID",
+    LOG_DIR = "TUTHPC_LOG_DIR",
 }
 
 
@@ -345,7 +346,9 @@ struct QueueOverflowProtector
 
 string logDirName(in JobEnvironment env, size_t runId)
 {
-    if(env.logdir.length != 0)
+    if(EnvironmentKey.LOG_DIR in environment)
+        return environment[EnvironmentKey.LOG_DIR];
+    else if(env.logdir.length != 0)
         return env.logdir;
     else
         return format("logs_%s_%s", hashOfExe(), runId);
@@ -593,7 +596,9 @@ if(isTaskList!TL)
         }
 
         uint parallelSize = std.parallelism.totalCPUs / env.ppn;
-        processTasks(env, parallelSize, iota(taskList.length), taskList, logdir, file, line, [EnvironmentKey.RUN_ID : RunState.countOfCallRun.to!string]);
+        env.envs[EnvironmentKey.RUN_ID] = RunState.countOfCallRun.to!string;
+        env.envs[EnvironmentKey.LOG_DIR] = logdir;
+        processTasks(env, parallelSize, iota(taskList.length), taskList, logdir, file, line, env.envs);
     }
 
   Lreturn:
@@ -606,6 +611,7 @@ PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment
 {
     env.envs[EnvironmentKey.RUN_ID] = runId;
     env.envs[EnvironmentKey.ARRAY_ID] = "${PBS_ARRAYID}";
+    env.envs[EnvironmentKey.LOG_DIR] = logDirName(env, RunState.countOfCallRun);
 
     string dstJobId;
 
