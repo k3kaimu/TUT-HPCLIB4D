@@ -1,11 +1,15 @@
-import std.stdio;
-import tuthpc.taskqueue;
-import std.process;
-import std.algorithm;
-import std.string;
-import std.conv;
-import std.range;
+module app;
 
+import core.thread;
+
+import std.algorithm;
+import std.conv;
+import std.process;
+import std.range;
+import std.stdio;
+import std.string;
+
+import tuthpc.taskqueue;
 
 immutable CMD_HEADER = "TUTHPCLIB4D:";
 
@@ -39,6 +43,7 @@ void main(string[] args)
 
     // プログラムを起動
     auto pipes = pipeProcess(args);
+    ulong submitCount = 0;
     foreach(line; pipes.stdout.byLine){
         if(line.startsWith(CMD_HEADER)){
             auto cmd = line[CMD_HEADER.length .. $];
@@ -46,23 +51,24 @@ void main(string[] args)
 
             switch(cmdargs[0]) {
                 case "submit":
-                    pipes.stdin.writeln("-1");  // End process
+                    submitToQueue(env, args, cmdargs[1].to!ulong, submitCount);
+                    ++submitCount;
+                    pipes.stdin.writeln("-1");  // 次のコマンドに移る
                     pipes.stdin.flush();
-                    writeln("Waiting...");
-                    wait(pipes.pid);
-                    writeln("Submit!");
-                    submitToQueue(env, args, cmdargs[1].to!uint);
+                    Thread.sleep(1.seconds);
                     break;
                 default:
                     throw new Exception("Unsupported command: %s".format(cmdargs[0]));
             }
         }
     }
+    writeln("Waiting process termination...");
+    wait(pipes.pid);
 }
 
 
 
-void submitToQueue(JobEnvironment env, string[] args, uint len)
+void submitToQueue(JobEnvironment env, string[] args, ulong len, ulong runCount)
 {
     import std.datetime : Clock;
     env.isEnabledRenameExeFile = false;
@@ -71,9 +77,26 @@ void submitToQueue(JobEnvironment env, string[] args, uint len)
     foreach(i; iota(len).runAsTasks(env)) {
         auto p = pipe();
         auto pid = spawnProcess(args, p.readEnd);
+        scope(failure) kill(pid);
+        scope(success) wait(pid);
+
+        // 該当するsubmitが出現するまで-1を与える
+        foreach(_; 0 .. runCount) {
+            p.writeEnd.writeln("-1");
+            p.writeEnd.flush();
+        }
+
+        // 該当するsubmitに対してタスクの番号を与える
         p.writeEnd.writeln(i);
         p.writeEnd.flush();
-        wait(pid);
+        //wait(pid);
+
+        while(!tryWait(pid).terminated) {
+            p.writeEnd.writeln("-1");
+            p.writeEnd.flush();
+
+            Thread.sleep(100.msecs);
+        }
     }
 }
 
