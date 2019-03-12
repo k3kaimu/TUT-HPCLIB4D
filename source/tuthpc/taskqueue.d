@@ -88,6 +88,7 @@ struct JobEnvironment
     bool isEnabledEmailOnEnd = false;   /// 実行終了時にメールで通知するかどうか
     string[] emailAddrs;                /// メールを送りたい宛先
     uint maxArraySize = 8192;           /// アレイジョブでの最大のサイズ
+    uint maxSlotSize = 0;               /// アレイジョブでの最大スロット数(-t 1-100%5の5のこと), 0は無設定（無制限）
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
     size_t totalProcessNum = 50;
@@ -114,6 +115,7 @@ struct JobEnvironment
                 "th:mailOnFinish|th:mf", &isEnabledEmailOnEnd,
                 "th:mailTo", &emailAddrs,
                 "th:maxArraySize|th:m", &maxArraySize,
+                "th:maxSlotSize|th:s", &maxSlotSize,
                 "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
                 "th:maxProcessNum|th:plim", &totalProcessNum,
                 "th:logdir", &logdir
@@ -261,7 +263,16 @@ void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment jenv, s
         orange.formattedWrite("#PBS -W depend=%s:%s\n", cast(string)jenv.dependencySetting, jenv.dependentJob);
     }
 
-    if(jenv.useArrayJob) orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
+    if(jenv.useArrayJob) {
+        orange.formattedWrite("#PBS -t %s-%s", 0, jobCount-1);
+
+        if(jenv.maxSlotSize != 0) {
+            orange.put('%');
+            orange.formattedWrite("%s", jenv.maxSlotSize);
+        }
+
+        orange.put('\n');
+    }
 
     if(jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) {
         .put(orange, "#PBS -m ");
