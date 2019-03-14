@@ -30,3 +30,9 @@ shared static this()
             ClusterInfo("wdev", 30, 20, 100, "wdev", "wLrchq", (string hname) => hname.startsWith("wsnd")),
     ];
 }
+
+
+Cluster currCluster()
+{
+    return Cluster.wdev;
+}

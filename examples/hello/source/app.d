@@ -4,7 +4,7 @@ import tuthpc.taskqueue;
 
 void main()
 {
-    JobEnvironment env;
+    auto env = defaultJobEnvironment;
 
     {
         auto list = new MultiTaskList();

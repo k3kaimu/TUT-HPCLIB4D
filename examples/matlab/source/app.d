@@ -16,7 +16,7 @@ void main(string[] args)
 
 void mainJob1()
 {
-	JobEnvironment env;
+	auto env = defaultJobEnvironment;
 	env.loadModules ~= "matlab";
 	env.queueName = "wEduq";
 

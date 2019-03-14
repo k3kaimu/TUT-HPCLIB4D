@@ -243,6 +243,13 @@ MPIはサポートしていません．
     * 実行時引数： `--th:requireUserCheck`, (ex. `--th:requireUserCheck=false`)
     * クラスタにジョブを投げる前にユーザーに確認を取るか指定します．デフォルト値ではユーザーに確認します．
 
++ `JobEnvironment.isForcedCommandLineArgs`
+
+    * `bool`
+    * デフォルト値：`true`
+    * `--th:forceCommandLineArgs`, (ex. `--th:forceCommandLineArgs=false`)
+    * 実行時に変更された`JobEnvironment`の値をコマンドライン引数で指定した値に上書きします．デフォルト値では上書きします．
+
 + `JobEnvironment.logdir`
     
     * `string`

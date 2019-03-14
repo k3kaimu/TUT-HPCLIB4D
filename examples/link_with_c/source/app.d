@@ -4,7 +4,7 @@ extern(C) void func_A(float a, float b, int c);
 
 void main()
 {
-    JobEnvironment env;
+    auto env = defaultJobEnvironment;
     auto taskList = new MultiTaskList();
 
     foreach(i; 0 .. 10)

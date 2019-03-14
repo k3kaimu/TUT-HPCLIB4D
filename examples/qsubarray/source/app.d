@@ -22,7 +22,7 @@ void printUsage()
 
 void main(string[] args)
 {
-    JobEnvironment env;
+    auto env = defaultJobEnvironment;
 
     if(args.length == 1) {
         printUsage();

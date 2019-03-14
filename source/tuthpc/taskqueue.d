@@ -9,6 +9,7 @@ public import tuthpc.tasklist;
 import tuthpc.limiter;
 
 import std.algorithm;
+import std.ascii;
 import std.conv;
 import std.datetime;
 import std.digest.crc;
@@ -59,7 +60,7 @@ enum DependencySetting
 }
 
 
-struct JobEnvironment
+class JobEnvironment
 {
     bool useArrayJob = true;    /// ArrayJobにするかどうか
     bool useArgs = true;
@@ -91,7 +92,8 @@ struct JobEnvironment
     uint maxArraySize = 8192;           /// アレイジョブでの最大のサイズ
     uint maxSlotSize = 0;               /// アレイジョブでの最大スロット数(-t 1-100%5の5のこと), 0は無設定（無制限）
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
-    bool isEnabledUserCheckBeforePush = true;
+    bool isEnabledUserCheckBeforePush = true;       /// ジョブを投げる前にユーザーに確認を要求するかどうか
+    bool isForcedCommandLineArgs = true;            /// コマンドライン引数による指定で実行時の値を上書きするか
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
     size_t totalProcessNum = 50;
     string logdir;              /// 各タスクの標準出力，標準エラーを保存するディレクトリを指定できる
@@ -121,6 +123,7 @@ struct JobEnvironment
                 "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
                 "th:requireUserCheck", &isEnabledUserCheckBeforePush,
                 "th:maxProcessNum|th:plim", &totalProcessNum,
+                "th:forceCommandLineArgs", &isForcedCommandLineArgs,
                 "th:logdir", &logdir
             );
 
@@ -216,19 +219,36 @@ struct JobEnvironment
     }
 
 
-    void opAssign(in JobEnvironment rhs)
+    JobEnvironment dup() const
     {
+        JobEnvironment newval = new JobEnvironment();
+
         foreach(i, ref e; this.tupleof){
-            static if(is(typeof(e) : ulong) || is(typeof(e) : string) || is(typeof(e) : Duration)){
-                e = rhs.tupleof[i];
-            }else static if(is(typeof(e) : string[]) || is(typeof(e) : string[string])){
-                e = null;
-                foreach(k, v; rhs.tupleof[i])
-                    e[k] = v;
+            alias E = Unqual!(typeof(e));
+
+            static if(is(E : ulong) || is(E : string) || is(E : Duration)){
+                newval.tupleof[i] = e;
+            }else static if(isArray!(E)) {
+                foreach(v; e)
+                    newval.tupleof[i] ~= v;
+            }else static if(is(E : const(string)[string])){
+                newval.tupleof[i] = null;
+                foreach(k, v; e)
+                    newval.tupleof[i][k] = v;
             }else
-                static assert(0);
+                static assert(0, E.stringof);
         }
+
+        return newval;
     }
+}
+
+
+JobEnvironment defaultJobEnvironment()
+{
+    JobEnvironment env;
+    env.applyDefaults(currCluster());
+    return env;
 }
 
 
@@ -508,12 +528,12 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
 }
 
 
-PushResult run(TL)(TL taskList, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
+PushResult run(TL)(TL taskList, in JobEnvironment envIn = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
 if(isTaskList!TL)
 {
-    import std.ascii;
+    auto env = envIn.dup;
 
-    auto cluster = Cluster.wdev;
+    auto cluster = currCluster();
     env.useArrayJob = true;
 
     if(env.nodes == 1 && env.ppn == 1 && env.taskGroupSize == 0){
@@ -525,7 +545,8 @@ if(isTaskList!TL)
             env.taskGroupSize = 11;
     }
 
-    env.applyDefaults(cluster);
+    if(env.isForcedCommandLineArgs)
+        env.applyDefaults(cluster);
 
     PushResult result;
     immutable nowInRunOld = RunState.nowInRun;
@@ -672,7 +693,7 @@ PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment
 
 template afterRunImpl(DependencySetting ds)
 {
-    PushResult afterRunImpl(TL)(PushResult parentJob, TL taskList, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
+    PushResult afterRunImpl(TL)(PushResult parentJob, TL taskList, JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
     if(isTaskList!TL)
     {
         env.dependentJob = parentJob.jobId;
@@ -715,7 +736,7 @@ unittest
 }
 
 
-auto runAsTasks(R)(R range, JobEnvironment env = JobEnvironment.init, string file = __FILE__, size_t line = __LINE__)
+auto runAsTasks(R)(R range, JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
 if(isInputRange!R)
 {
     static struct RunAsTasksResult

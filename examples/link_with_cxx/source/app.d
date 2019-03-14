@@ -12,7 +12,7 @@ void func_job(float a, float b, int c)
 
 void main()
 {
-    JobEnvironment env;
+    auto env = defaultJobEnvironment;
     env.queueName = "wEduq";
 
     auto taskList = new MultiTaskList();
