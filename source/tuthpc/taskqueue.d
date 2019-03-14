@@ -9,17 +9,18 @@ public import tuthpc.tasklist;
 import tuthpc.limiter;
 
 import std.algorithm;
-import std.range;
-import std.format;
 import std.conv;
-import std.process;
-import std.stdio;
-import std.exception;
-import std.digest.crc;
-import std.traits;
-import std.functional;
 import std.datetime;
+import std.digest.crc;
+import std.exception;
+import std.format;
+import std.functional;
 import std.path;
+import std.process;
+import std.range;
+import std.stdio;
+import std.string;
+import std.traits;
 
 
 enum EnvironmentKey : string
@@ -90,6 +91,7 @@ struct JobEnvironment
     uint maxArraySize = 8192;           /// アレイジョブでの最大のサイズ
     uint maxSlotSize = 0;               /// アレイジョブでの最大スロット数(-t 1-100%5の5のこと), 0は無設定（無制限）
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
+    bool isEnabledUserCheckBeforePush = true;
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
     size_t totalProcessNum = 50;
     string logdir;              /// 各タスクの標準出力，標準エラーを保存するディレクトリを指定できる
@@ -117,6 +119,7 @@ struct JobEnvironment
                 "th:maxArraySize|th:m", &maxArraySize,
                 "th:maxSlotSize|th:s", &maxSlotSize,
                 "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
+                "th:requireUserCheck", &isEnabledUserCheckBeforePush,
                 "th:maxProcessNum|th:plim", &totalProcessNum,
                 "th:logdir", &logdir
             );
@@ -554,6 +557,18 @@ if(isTaskList!TL)
 
         import std.file : mkdir;
         mkdir(logdir);
+
+        // ジョブを投げる前に投げてよいかユーザーに確かめる
+        if(env.isEnabledUserCheckBeforePush) {
+            writeln("A new array job will be submitted:");
+            writefln("\ttaskList.length: %s", taskList.length);
+            writefln("\tArray Job Size: %s", arrayJobSize);
+            writeln("Do you submit this job? [y|N] --- ");
+
+            auto userInput = readln().chomp;
+            enforce(userInput == "y" || userInput == "Y",
+                "This submission is aborted by the user.");
+        }
 
         // ジョブを投げる
         result = pushArrayJobToQueue(

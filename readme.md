@@ -233,7 +233,15 @@ MPIはサポートしていません．
 
     * `bool`
     * デフォルト値：`true`
+    * 実行時引数： `--th:queueOverflowProtection`, `--th:qop`, (ex. `--th:qop=false`)
     * クラスタのキューには16384個以上のジョブを管理できない制限があります．この制限を超えてジョブを投げることがないように，ジョブ投入の前にチェックするかどうかを指定できます．デフォルト値ではチェックします．
+
++ `JobEnvironment.isEnabledUserCheckBeforePush`
+
+    * `bool`
+    * デフォルト値：`true`
+    * 実行時引数： `--th:requireUserCheck`, (ex. `--th:requireUserCheck=false`)
+    * クラスタにジョブを投げる前にユーザーに確認を取るか指定します．デフォルト値ではユーザーに確認します．
 
 + `JobEnvironment.logdir`
     
