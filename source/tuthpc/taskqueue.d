@@ -99,37 +99,45 @@ class JobEnvironment
     string logdir;              /// 各タスクの標準出力，標準エラーを保存するディレクトリを指定できる
 
 
-    void applyDefaults(Cluster cluster)
+
+    void applyCommandLineArgs(in string[] args)
     {
-        if(useArgs){
-            import std.getopt;
-            auto args = Runtime.args;
-            int walltime_int = -1;
+        import std.getopt;
+        int walltime_int = -1;
 
-            getopt(args,
-                std.getopt.config.passThrough,
-                "th:queue|th:q", &queueName,
-                "th:after|th:a", &dependentJob,
-                "th:ppn|th:p", &ppn,
-                "th:nodes|th:n", &nodes,
-                "th:taskGroupSize|th:g", &taskGroupSize,
-                "th:walltime|th:w", &walltime_int,
-                "th:mailOnError|th:me", &isEnabledEmailOnError,
-                "th:mailOnStart|th:ms", &isEnabledEmailOnStart,
-                "th:mailOnFinish|th:mf", &isEnabledEmailOnEnd,
-                "th:mailTo", &emailAddrs,
-                "th:maxArraySize|th:m", &maxArraySize,
-                "th:maxSlotSize|th:s", &maxSlotSize,
-                "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
-                "th:requireUserCheck", &isEnabledUserCheckBeforePush,
-                "th:maxProcessNum|th:plim", &totalProcessNum,
-                "th:forceCommandLineArgs", &isForcedCommandLineArgs,
-                "th:logdir", &logdir
-            );
+        auto newargs = args.dup;
+        getopt(newargs,
+            std.getopt.config.passThrough,
+            "th:queue|th:q", &queueName,
+            "th:after|th:a", &dependentJob,
+            "th:ppn|th:p", &ppn,
+            "th:nodes|th:n", &nodes,
+            "th:taskGroupSize|th:g", &taskGroupSize,
+            "th:walltime|th:w", &walltime_int,
+            "th:mailOnError|th:me", &isEnabledEmailOnError,
+            "th:mailOnStart|th:ms", &isEnabledEmailOnStart,
+            "th:mailOnFinish|th:mf", &isEnabledEmailOnEnd,
+            "th:mailTo", &emailAddrs,
+            "th:maxArraySize|th:m", &maxArraySize,
+            "th:maxSlotSize|th:s", &maxSlotSize,
+            "th:queueOverflowProtection|th:qop", &isEnabledQueueOverflowProtection,
+            "th:requireUserCheck", &isEnabledUserCheckBeforePush,
+            "th:maxProcessNum|th:plim", &totalProcessNum,
+            "th:forceCommandLineArgs", &isForcedCommandLineArgs,
+            "th:logdir", &logdir
+        );
 
-            if(walltime_int != -1)
-                walltime = walltime_int.hours;
-        }
+        if(walltime_int != -1)
+            walltime = walltime_int.hours;
+    }
+
+
+    void autoSetting()
+    {
+        auto cluster = currCluster();
+
+        if(isForcedCommandLineArgs)
+            this.applyCommandLineArgs(Runtime.args);
 
         if(queueName is null) queueName = clusters[cluster].queueName;
         if(ppn == 0) ppn = clusters[cluster].maxPPN;
@@ -244,10 +252,10 @@ class JobEnvironment
 }
 
 
-JobEnvironment defaultJobEnvironment()
+JobEnvironment defaultJobEnvironment(string[] args = Runtime.args)
 {
-    JobEnvironment env;
-    env.applyDefaults(currCluster());
+    JobEnvironment env = new JobEnvironment();
+    env.applyCommandLineArgs(args);
     return env;
 }
 
@@ -330,6 +338,7 @@ struct RunState
 
 struct PushResult
 {
+    Flag!"isAborted" isAborted;     // ユーザーによりジョブを投げるのが中止された
     string jobId;
 }
 
@@ -545,8 +554,7 @@ if(isTaskList!TL)
             env.taskGroupSize = 11;
     }
 
-    if(env.isForcedCommandLineArgs)
-        env.applyDefaults(cluster);
+    env.autoSetting();
 
     PushResult result;
     immutable nowInRunOld = RunState.nowInRun;
@@ -576,20 +584,23 @@ if(isTaskList!TL)
                 goto Lreturn;
         }
 
-        import std.file : mkdir;
-        mkdir(logdir);
-
         // ジョブを投げる前に投げてよいかユーザーに確かめる
         if(env.isEnabledUserCheckBeforePush) {
             writeln("A new array job will be submitted:");
             writefln("\ttaskList.length: %s", taskList.length);
             writefln("\tArray Job Size: %s", arrayJobSize);
-            writeln("Do you submit this job? [y|N] --- ");
+            writefln("\tLog directory: %s", logdir);
+            write("Do you submit this job? [y|N] --- ");
 
             auto userInput = readln().chomp;
-            enforce(userInput == "y" || userInput == "Y",
-                "This submission is aborted by the user.");
+            if(userInput != "y" && userInput != "Y"){
+                writeln("This submission is aborted by the user.\n");
+                return PushResult(Yes.isAborted, "");
+            }
         }
+
+        import std.file : mkdir;
+        mkdir(logdir);
 
         // ジョブを投げる
         result = pushArrayJobToQueue(
@@ -601,6 +612,7 @@ if(isTaskList!TL)
         writefln("\ttaskList.length: %s", taskList.length);
         writefln("\tArray Job Size: %s", arrayJobSize);
         writefln("\tLog directory: %s", logdir);
+        writeln();
     }
     else if(nowRunningOnClusterComputingNode() && nowInRunOld == false)
     {
@@ -687,7 +699,7 @@ PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment
         dstJobId = pipes.stdout.byLine.front.split('.')[0].array().to!string;
     }
 
-    return PushResult(dstJobId);
+    return PushResult(No.isAborted, dstJobId);
 }
 
 
@@ -696,6 +708,11 @@ template afterRunImpl(DependencySetting ds)
     PushResult afterRunImpl(TL)(PushResult parentJob, TL taskList, JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
     if(isTaskList!TL)
     {
+        if(parentJob.isAborted) {
+            writeln("%s(%s): This job is aborted because the parent job of this job is aborted.", file, line);
+            return PushResult(Yes.isAborted, "");
+        }
+
         env.dependentJob = parentJob.jobId;
         env.dependencySetting = ds;
         return run(taskList, env, file, line);
@@ -736,7 +753,7 @@ unittest
 }
 
 
-auto runAsTasks(R)(R range, JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
+auto runAsTasks(R)(R range, in JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
 if(isInputRange!R)
 {
     static struct RunAsTasksResult
@@ -780,7 +797,7 @@ if(isInputRange!R)
     }
 
 
-    return RunAsTasksResult(range, env, file, line);
+    return RunAsTasksResult(range, env.dup, file, line);
 }
 
 
