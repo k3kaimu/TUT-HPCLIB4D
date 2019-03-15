@@ -17,7 +17,7 @@ import tuthpc.taskqueue;
 void main()
 {
     // ジョブをスケジューラに投入する際の設定
-    JobEnvironment env;
+    auto env = defaultJobEnvironment();
 
     // ジョブスケジューラに投げるジョブリスト
     auto taskList = new MultiTaskList();
@@ -60,7 +60,7 @@ import tuthpc.taskqueue;
 void main()
 {
     // ジョブをスケジューラに投入する際の設定
-    JobEnvironment env;
+    auto env = defaultJobEnvironment();
 
     // ジョブスケジューラに投げるジョブリスト
     auto taskList = new MultiTaskList();
