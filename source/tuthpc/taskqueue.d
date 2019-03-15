@@ -63,7 +63,6 @@ enum DependencySetting
 class JobEnvironment
 {
     bool useArrayJob = true;    /// ArrayJobにするかどうか
-    bool useArgs = true;
     string scriptPath;          /// スクリプトファイルの保存場所, nullならパイプでqsubにジョブを送る
     string queueName;           /// nullのとき，自動でclusters[cluster].queueNameに設定される
     string dependentJob;        /// 依存しているジョブのID

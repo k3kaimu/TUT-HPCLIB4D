@@ -94,12 +94,6 @@ MPIはサポートしていません．
     * デフォルト値：`true`
     * アレイジョブにする場合`true`，個別のジョブを入れる場合は`false`を指定します．現在は`false`でもアレイジョブを投入するようになっています．
 
-+ `JobEnvironment.useArgs`
-
-    * `bool`
-    * デフォルト値：`true`
-    * `true`の場合，プログラムの実行時引数を利用して`JobEnvironment`型の値を設定します．
-
 + `JobEnvironment.scriptPath`
 
     * `string`
