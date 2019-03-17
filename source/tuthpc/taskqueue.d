@@ -394,7 +394,7 @@ string logDirName(in JobEnvironment env, size_t runId)
 }
 
 
-Pid spawnTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line, string[string] addEnvs = null)
+Pid spawnTask(in string[] args, JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line, string[string] addEnvs = null)
 {
     import std.path;
 
@@ -407,7 +407,7 @@ Pid spawnTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file,
     string[string] env = [EnvironmentKey.TASK_ID : taskIndex.to!string];
     foreach(k, v; addEnvs) env[k] = v;
 
-    auto pid = spawnProcess(jenv.renamedExePath ~ Runtime.args[1 .. $], std.stdio.stdin, File(outname, "w"), File(errname, "w"), env);
+    auto pid = spawnProcess(args, std.stdio.stdin, File(outname, "w"), File(errname, "w"), env);
     return pid;
 }
 
@@ -475,7 +475,7 @@ void copyLogTextToStdOE(int status, JobEnvironment jenv, size_t taskIndex, strin
 }
 
 
-void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL taskList, string logdir, string file, size_t line, string[string] addEnvs = null)
+void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSize, R taskIndxs, TL taskList, string logdir, string file, size_t line, string[string] addEnvs = null)
 {
     import std.path;
     import std.process;
@@ -514,7 +514,7 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
                 if(proc is null && !taskIndxs.empty) {
                     immutable size_t taskIndex = taskIndxs.front;
                     taskIndxs.popFront();
-                    proc = new ProcessState(spawnTask(jenv, taskIndex, logdir, file, line, addEnvs), taskIndex);
+                    proc = new ProcessState(spawnTask(args, jenv, taskIndex, logdir, file, line, addEnvs), taskIndex);
                 }
 
                 if(proc !is null) {
@@ -631,7 +631,7 @@ if(isTaskList!TL)
                 for(size_t taskIndex = index + p; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize)
                     taskIndexList ~= taskIndex;
 
-            processTasks(env, env.taskGroupSize, taskIndexList, taskList, logdir, file, line);
+            processTasks(Runtime.args, env, env.taskGroupSize, taskIndexList, taskList, logdir, file, line);
         }
     }
     else if(nowInRunOld == true)
@@ -659,7 +659,7 @@ if(isTaskList!TL)
         uint parallelSize = std.parallelism.totalCPUs / env.ppn;
         env.envs[EnvironmentKey.RUN_ID] = RunState.countOfCallRun.to!string;
         env.envs[EnvironmentKey.LOG_DIR] = logdir;
-        processTasks(env, parallelSize, iota(taskList.length), taskList, logdir, file, line, env.envs);
+        processTasks(env.renamedExePath ~ Runtime.args[1 .. $], env, parallelSize, iota(taskList.length), taskList, logdir, file, line, env.envs);
     }
 
   Lreturn:
