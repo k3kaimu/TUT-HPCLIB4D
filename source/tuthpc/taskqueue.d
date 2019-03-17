@@ -15,6 +15,7 @@ import std.datetime;
 import std.digest.crc;
 import std.exception;
 import std.format;
+import std.file;
 import std.functional;
 import std.path;
 import std.process;
@@ -71,8 +72,8 @@ class JobEnvironment
     string[] loadModules;       /// module loadで読み込まれるモジュール
     string[string] envs;        /// 環境変数
     bool isEnabledRenameExeFile = true; /// 実行ジョブファイル名を，バイナリ表現にもとづきユニークな名前に変更します．
-    string originalExeName;     /// リネーム・コピー前の実行ファイル名
-    string renamedExeName;      /// リネーム・コピー後の実行ファイル名
+    string originalExePath;     /// リネーム・コピー前の実行ファイルのパス
+    string renamedExePath;      /// リネーム・コピー後の実行ファイルのパス
     string[] prescript;         /// プログラム実行前に実行されるシェルスクリプト
     string[] jobScript;         /// ジョブスクリプト
     string[] postscript;        /// プログラム実行後に実行されるシェルスクリプト
@@ -179,25 +180,17 @@ class JobEnvironment
             }
         }
 
-        import core.runtime;
         if(jobScript is null){
-            originalExeName = Runtime.args[0];
-            bool bStartsWithDOTSLASH = false;
-            while(originalExeName.startsWith("./")){
-                bStartsWithDOTSLASH = true;
-                originalExeName = originalExeName[2 .. $];
+            originalExePath = Runtime.args[0];
+            if(isEnabledRenameExeFile && renamedExePath.walkLength == 0) {
+                renamedExePath = format("./%s_%s",
+                    originalExePath.baseName,
+                    crc32Of(cast(ubyte[])std.file.read(originalExePath)).toHexString);
+            } else {
+                renamedExePath = originalExePath;
             }
 
-            if(isEnabledRenameExeFile && renamedExeName.walkLength == 0){
-                import std.file;
-                renamedExeName = format("%s_%s", originalExeName, crc32Of(cast(ubyte[])std.file.read(originalExeName)).toHexString);
-            }
-
-            if(!isEnabledRenameExeFile && renamedExeName.walkLength == 0){
-                renamedExeName = originalExeName;
-            }
-
-            jobScript = [format("%s %-('%s'%| %)", (bStartsWithDOTSLASH ? "./" : "") ~ renamedExeName, Runtime.args[1 .. $])];
+            jobScript = [format("%s %-('%s'%| %)", renamedExePath, Runtime.args[1 .. $])];
 
             if(isEnabledEmailOnError){
                 if(environment.get("MAILGUN_APIKEY")
@@ -223,6 +216,21 @@ class JobEnvironment
 
             jobScript ~= "echo $?";
         }
+    }
+
+
+    void copyExeFile()
+    {
+        if(!isEnabledRenameExeFile)
+            return;
+
+        // check that the renamed file already exists
+        if(exists(renamedExePath))
+            return;
+
+        writefln("copy: %s -> %s", originalExePath, renamedExePath);
+        std.file.copy(originalExePath, renamedExePath);
+        enforce(execute(["chmod", "+x", renamedExePath]).status == 0);
     }
 
 
@@ -261,17 +269,6 @@ JobEnvironment defaultJobEnvironment(string[] args = Runtime.args)
 
 void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment jenv, size_t jobCount = 1)
 {
-    if(jenv.isEnabledRenameExeFile){
-        import std.file;
-
-        // check that the renamed file already exists
-        if(!exists(jenv.renamedExeName)) {
-            writefln("copy: %s -> %s", jenv.originalExeName, jenv.renamedExeName);
-            std.file.copy(jenv.originalExeName, jenv.renamedExeName);
-            enforce(execute(["chmod", "+x", jenv.renamedExeName]).status == 0);
-        }
-    }
-
     .put(orange, "#!/bin/bash\n");
     orange.formattedWrite("#PBS -l nodes=%s:ppn=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
     if(jenv.mem != -1) orange.formattedWrite(",mem=%sgb", jenv.mem);
@@ -410,12 +407,12 @@ Pid spawnTask(JobEnvironment jenv, size_t taskIndex, string logdir, string file,
     string[string] env = [EnvironmentKey.TASK_ID : taskIndex.to!string];
     foreach(k, v; addEnvs) env[k] = v;
 
-    auto pid = spawnProcess(Runtime.args, std.stdio.stdin, File(outname, "w"), File(errname, "w"), env);
+    auto pid = spawnProcess(jenv.renamedExePath ~ Runtime.args[1 .. $], std.stdio.stdin, File(outname, "w"), File(errname, "w"), env);
     return pid;
 }
 
 
-void loggingTask(int status, JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
+void copyLogTextToStdOE(int status, JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
 {
     import std.path;
     import std.stdio;
@@ -523,7 +520,7 @@ void processTasks(R, TL)(JobEnvironment jenv, uint parallelSize, R taskIndxs, TL
                 if(proc !is null) {
                     auto status = tryWait(proc.pid);
                     if(status.terminated) {
-                        loggingTask(status.status, jenv, proc.taskIndex, logdir, file, line);
+                        copyLogTextToStdOE(status.status, jenv, proc.taskIndex, logdir, file, line);
                         proc = null;
                     }
                 }
@@ -601,6 +598,9 @@ if(isTaskList!TL)
         import std.file : mkdir;
         mkdir(logdir);
 
+        // 実行ファイルのコピー
+        env.copyExeFile();
+
         // ジョブを投げる
         result = pushArrayJobToQueue(
             RunState.countOfCallRun.to!string,
@@ -651,6 +651,9 @@ if(isTaskList!TL)
             // Task実行プロセスで必要なため，管理するプロセスでは予めログ用のディレクトリを作っておく
             import std.file : mkdir;
             mkdir(logdir);
+
+            // 実行ファイルのコピー
+            env.copyExeFile();
         }
 
         uint parallelSize = std.parallelism.totalCPUs / env.ppn;
