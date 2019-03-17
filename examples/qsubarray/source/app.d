@@ -4,6 +4,7 @@ import core.thread;
 
 import std.algorithm;
 import std.conv;
+import std.datetime;
 import std.process;
 import std.range;
 import std.stdio;
@@ -23,6 +24,7 @@ void printUsage()
 void main(string[] args)
 {
     auto env = defaultJobEnvironment;
+    immutable startUpTime = Clock.currTime;
 
     if(args.length == 1) {
         printUsage();
@@ -51,7 +53,7 @@ void main(string[] args)
 
             switch(cmdargs[0]) {
                 case "submit":
-                    submitToQueue(env, args, cmdargs[1].to!ulong, submitCount);
+                    submitToQueue(env, args, cmdargs[1].to!ulong, startUpTime, submitCount);
                     ++submitCount;
                     pipes.stdin.writeln("-1");  // 次のコマンドに移る
                     pipes.stdin.flush();
@@ -68,11 +70,10 @@ void main(string[] args)
 
 
 
-void submitToQueue(JobEnvironment env, string[] args, ulong len, ulong runCount)
+void submitToQueue(JobEnvironment env, string[] args, ulong len, SysTime time, ulong runCount)
 {
-    import std.datetime : Clock;
     env.isEnabledRenameExeFile = false;
-    env.logdir = format("logs_%s", Clock.currTime.toISOString());
+    env.logdir = format("logs_%s_%s", time.toISOString(), runCount);
 
     foreach(i; iota(len).runAsTasks(env)) {
         auto p = pipe();
