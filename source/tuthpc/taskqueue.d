@@ -3,8 +3,7 @@ module tuthpc.taskqueue;
 import core.runtime;
 
 import tuthpc.mail;
-import tuthpc.hosts;
-import tuthpc.constant;
+import tuthpc.cluster;
 public import tuthpc.tasklist;
 import tuthpc.limiter;
 
@@ -32,6 +31,7 @@ enum EnvironmentKey : string
     TASK_ID = "TUTHPC_JOB_ENV_TASK_ID",
     PBS_JOBID = "PBS_JOBID",
     LOG_DIR = "TUTHPC_LOG_DIR",
+    EMAIL_ADDR = "TUTHPC_EMAIL_ADDR",
 }
 
 
@@ -40,16 +40,6 @@ string hashOfExe()
     import std.file;
 
     return crc32Of(cast(ubyte[])std.file.read(Runtime.args[0])).toHexString.dup;
-}
-
-
-string lockFileNameForLimitProcess()
-{
-    auto envs = environment.toAA();
-    if("PBS_JOBID" in envs && "PBS_ARRAYID" in envs)
-        return format("%s_%s", envs["PBS_JOBID"], envs["PBS_ARRAYID"]);
-    else
-        return hashOfExe();
 }
 
 
@@ -95,7 +85,7 @@ class JobEnvironment
     bool isEnabledUserCheckBeforePush = true;       /// ジョブを投げる前にユーザーに確認を要求するかどうか
     bool isForcedCommandLineArgs = true;            /// コマンドライン引数による指定で実行時の値を上書きするか
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
-    size_t totalProcessNum = 50;
+    size_t totalProcessNum = 0;
     string logdir;              /// 各タスクの標準出力，標準エラーを保存するディレクトリを指定できる
 
 
@@ -134,37 +124,41 @@ class JobEnvironment
 
     void autoSetting()
     {
-        auto cluster = currCluster();
+        auto cluster = ClusterInfo.currInstance;
 
         if(isForcedCommandLineArgs)
             this.applyCommandLineArgs(Runtime.args);
 
-        if(queueName is null) queueName = clusters[cluster].queueName;
-        if(ppn == 0) ppn = clusters[cluster].maxPPN;
-        if(nodes == 0) nodes = clusters[cluster].maxNode;
+        if(queueName is null) queueName = cluster.defaultQueueName;
+        if(ppn == 0) ppn = 1;
+        if(nodes == 0) nodes = 1;
 
-        if(nodes == 1 && ppn == 1 && taskGroupSize == 0){
-            taskGroupSize = 11;
+        if(nodes == 1 && ppn == 1 && taskGroupSize == 0) {
+            if(cast(TUTWInfo)cluster) { // TUTクラスタかそうでないか
+                taskGroupSize = 11;
+            } else {
+                taskGroupSize = 72;
+            }
         }else if(nodes != 1 || ppn != 1){
             taskGroupSize = 1;
         }
 
-        int maxMem = 5 * (ppn * taskGroupSize),
-            maxMemPerPS = maxMem / (ppn * taskGroupSize);
+        {
+            int maxMem = (cluster.maxMemGB * 1000 / cluster.maxPPN) * (ppn * taskGroupSize) / 1000,
+                maxMemPerPS = maxMem / (ppn * taskGroupSize);
 
-        if(!queueName.endsWith("rchq")){
-            maxMem = 5;
-            maxMemPerPS = 5;
+            if(mem == 0) mem = maxMem;
+            if(pmem == 0) pmem = maxMemPerPS;
+            if(vmem == 0) vmem = maxMem;
+            if(pvmem == 0) pvmem = maxMemPerPS;
         }
-
-        if(mem == 0) mem = maxMem;
-        if(pmem == 0) pmem = maxMemPerPS;
-        if(vmem == 0) vmem = maxMem;
-        if(pvmem == 0) pvmem = maxMemPerPS;
 
         if(walltime == 0.seconds){
             switch(queueName){
                 case "wLrchq":
+                    walltime = 335.hours;
+                    break;
+                case "gr10061b":
                     walltime = 335.hours;
                     break;
                 default:
@@ -173,10 +167,9 @@ class JobEnvironment
         }
 
         if(isEnabledEmailOnStart || isEnabledEmailOnEnd || isEnabledEmailOnError) {
-            if(emailAddrs.length == 0){
-                string username = environment.get("USER", null);
-                enforce(username !is null, "Cannot find USER in ENV.");
-                emailAddrs = [username ~ "@edu.tut.ac.jp"];
+            if(emailAddrs.length == 0) {
+                enforce(EnvironmentKey.EMAIL_ADDR in environment);
+                emailAddrs = [environment[EnvironmentKey.EMAIL_ADDR]];
             }
         }
 
@@ -215,6 +208,10 @@ class JobEnvironment
             }
 
             jobScript ~= "echo $?";
+        }
+
+        if(totalProcessNum == 0) {
+            totalProcessNum = cluster.maxPPN * 5;
         }
     }
 
@@ -267,53 +264,87 @@ JobEnvironment defaultJobEnvironment(string[] args = Runtime.args)
 }
 
 
-void makeQueueScript(R)(ref R orange, Cluster cluster, in JobEnvironment jenv, size_t jobCount = 1)
+void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jenv, size_t jobCount = 1)
 {
+    string headerID = "PBS";
+    if(cast(KyotoBInfo)cluster)
+        headerID = "QSUB";
+
     .put(orange, "#!/bin/bash\n");
-    orange.formattedWrite("#PBS -l nodes=%s:ppn=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
-    if(jenv.mem != -1) orange.formattedWrite(",mem=%sgb", jenv.mem);
-    if(jenv.pmem != -1) orange.formattedWrite(",pmem=%sgb", jenv.pmem);
-    if(jenv.vmem != -1) orange.formattedWrite(",vmem=%sgb", jenv.vmem);
-    if(jenv.pvmem != -1) orange.formattedWrite(",pvmem=%sgb", jenv.pvmem);
+
+    // resource(nodes, ppn,)
+    if(headerID == "PBS") {
+        orange.formattedWrite("#PBS -l nodes=%s:ppn=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
+        if(jenv.mem != -1) orange.formattedWrite(",mem=%sgb", jenv.mem);
+        if(jenv.pmem != -1) orange.formattedWrite(",pmem=%sgb", jenv.pmem);
+        if(jenv.vmem != -1) orange.formattedWrite(",vmem=%sgb", jenv.vmem);
+        if(jenv.pvmem != -1) orange.formattedWrite(",pvmem=%sgb", jenv.pvmem);
+    } else if(headerID == "QSUB") {
+        orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s,", jenv.nodes, jenv.ppn * jenv.taskGroupSize * 2, jenv.ppn * jenv.taskGroupSize);
+        if(jenv.mem != -1) orange.formattedWrite(":m=%sG", jenv.mem);
+    } else {
+        enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
+    }
 
     .put(orange, '\n');
 
-    {
+    // walltime
+    if(headerID == "PBS") {
         int hrs, mins, secs;
         jenv.walltime.split!("hours", "minutes", "seconds")(hrs, mins, secs);
         orange.formattedWrite("#PBS -l walltime=%d:%02d:%02d\n", hrs, mins, secs);
+    } else if(headerID == "QSUB") {
+        int hrs, mins, secs;
+        jenv.walltime.split!("hours", "minutes", "seconds")(hrs, mins, secs);
+        orange.formattedWrite("#QSUB -W =%d:%d\n", hrs, mins);
+    } else {
+        enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
     }
 
-    orange.formattedWrite("#PBS -q %s\n", jenv.queueName);
+    orange.formattedWrite("#%s -q %s\n", headerID, jenv.queueName);
 
+    // dependency setting
     if(jenv.dependentJob.length != 0){
-        orange.formattedWrite("#PBS -W depend=%s:%s\n", cast(string)jenv.dependencySetting, jenv.dependentJob);
+        orange.formattedWrite("#%s -W depend=%s:%s\n", headerID, cast(string)jenv.dependencySetting, jenv.dependentJob);
     }
 
+    // array job
     if(jenv.useArrayJob) {
-        orange.formattedWrite("#PBS -t %s-%s", 0, jobCount-1);
+        if(headerID == "PBS") {
+            orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
 
-        if(jenv.maxSlotSize != 0) {
-            orange.put('%');
-            orange.formattedWrite("%s", jenv.maxSlotSize);
+            if(jenv.maxSlotSize != 0) {
+                orange.put('%');
+                orange.formattedWrite("%s", jenv.maxSlotSize);
+            }
+        } else if(headerID == "QSUB") {
+            orange.formattedWrite("#QSUB -J %s-%s\n", 0, jobCount-1);
+            if(jenv.maxSlotSize != 0)
+                writeln("In this cluster, maxSlotSize is ignored.");
+        } else {
+            enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
         }
-
-        orange.put('\n');
     }
 
     if(jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) {
-        .put(orange, "#PBS -m ");
+        orange.formattedWrite("#%s -m ", headerID);
         if(jenv.isEnabledEmailOnStart)  .put(orange, 'b');
         if(jenv.isEnabledEmailOnEnd)    .put(orange, 'e');
         if(jenv.isEnabledEmailOnError)  .put(orange, 'a');
         .put(orange, '\n');
-        orange.formattedWrite("#PBS -M %-(%s %)\n", jenv.emailAddrs);
+        orange.formattedWrite("#%s -M %-(%s %)\n", headerID, jenv.emailAddrs);
     }
 
     .put(orange, "set -e\n");
     .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
-    .put(orange, "cd $PBS_O_WORKDIR\n");
+
+    if(headerID == "PBS")
+        .put(orange, "cd $PBS_O_WORKDIR\n");
+    else if(headerID == "QSUB")
+        .put(orange, "cd $QSUB_WORKDIR\n");
+    else
+        enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
 
     foreach(e; jenv.unloadModules) orange.formattedWrite("module unload %s\n", e);
     foreach(e; jenv.loadModules) orange.formattedWrite("module load %s\n", e);
@@ -356,11 +387,12 @@ struct QueueOverflowProtector
     static
     void analyze(size_t jobSize, size_t runId, string file, size_t line)
     {
-        enforce(nowRunningOnClusterDevelopmentHost());
+        auto cinfo = ClusterInfo.currInstance;
+        enforce(cinfo !is null && cinfo.isDevHost);
 
         if(isAnalyzerProcess){
             if(countOfEnqueuedJobs == -1){
-                countOfEnqueuedJobs = tuthpc.hosts.countOfEnqueuedJobs();
+                countOfEnqueuedJobs = tuthpc.limiter.countOfEnqueuedJobs();
                 enforce(countOfEnqueuedJobs != -1, "Cannot get the number of enqueued jobs.");
             }
 
@@ -398,9 +430,12 @@ Pid spawnTask(in string[] args, JobEnvironment jenv, size_t taskIndex, string lo
 {
     import std.path;
 
-    if(nowRunningOnClusterDevelopmentHost() || nowRunningOnClusterComputingNode())
+    if(ClusterInfo.currInstance)
+    {
         enforce(numOfProcessOfUser() <= jenv.totalProcessNum,
             "Many processes are spawned.\n Process List:\n%(%s\n%)".format(pgrepByUser()));
+    }
+
 
     string outname = buildPath(logdir, format("stdout_%s.log", taskIndex));
     string errname = buildPath(logdir, format("stderr_%s.log", taskIndex));
@@ -459,6 +494,7 @@ void copyLogTextToStdOE(int status, JobEnvironment jenv, size_t taskIndex, strin
         if(auto s = environment.get(EnvironmentKey.TASK_ID))  info ~= [EnvironmentKey.TASK_ID,      s];
         info ~= ["TUTHPC_JOB_ENV_TASK_ID",      taskIndex.to!string];
         info ~= ["PBS_ARRAYID",         environment.get("PBS_ARRAYID", "Unknown")];
+        info ~= ["PBS_ARRAY_INDEX",         environment.get("PBS_ARRAY_INDEX", "Unknown")];
         //info ~= ["Job size",            taskList.length.to!string];
         //info ~= ["Start time",          startTime.toISOExtString()];
         info ~= ["End time",            Clock.currTime.toISOExtString()];
@@ -539,10 +575,10 @@ if(isTaskList!TL)
 {
     auto env = envIn.dup;
 
-    auto cluster = currCluster();
+    auto cluster = ClusterInfo.currInstance;
     env.useArrayJob = true;
 
-    if(env.nodes == 1 && env.ppn == 1 && env.taskGroupSize == 0){
+    if(cast(TUTWInfo)cluster !is null && env.nodes == 1 && env.ppn == 1 && env.taskGroupSize == 0){
         if(taskList.length <= 40)
             env.taskGroupSize = 1;
         else if(taskList.length < 220)
@@ -557,7 +593,7 @@ if(isTaskList!TL)
     immutable nowInRunOld = RunState.nowInRun;
 
     RunState.nowInRun = true;
-    scope(exit){
+    scope(exit) {
         RunState.nowInRun = nowInRunOld;
         if(!RunState.nowInRun)
             ++RunState.countOfCallRun;
@@ -569,12 +605,12 @@ if(isTaskList!TL)
 
     immutable logdir = logDirName(env, RunState.countOfCallRun);
 
-    if(nowRunningOnClusterDevelopmentHost())
+    if(cluster !is null && cluster.isDevHost)
     {
         enforce(nowInRunOld == false);
         enforce(env.useArrayJob);
 
-        if(nowRunningOnClusterDevelopmentHost() && env.isEnabledQueueOverflowProtection){
+        if(cluster.isDevHost && env.isEnabledQueueOverflowProtection){
             QueueOverflowProtector.analyze(arrayJobSize, RunState.countOfCallRun, file, line);
 
             if(QueueOverflowProtector.isAnalyzerProcess)
@@ -614,7 +650,7 @@ if(isTaskList!TL)
         writefln("\tLog directory: %s", logdir);
         writeln();
     }
-    else if(nowRunningOnClusterComputingNode() && nowInRunOld == false)
+    else if(cluster !is null && cluster.isCompNode && nowInRunOld == false)
     {
         enforce(
                 environment.get(EnvironmentKey.RUN_ID)
@@ -669,10 +705,11 @@ if(isTaskList!TL)
 
 
 private
-PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment env, Cluster cluster, string file, size_t line)
+PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment env, ClusterInfo cluster, string file, size_t line)
 {
     env.envs[EnvironmentKey.RUN_ID] = runId;
-    env.envs[EnvironmentKey.ARRAY_ID] = "${PBS_ARRAYID}";
+
+    env.envs[EnvironmentKey.ARRAY_ID] = "${%s}".format(cluster.arrayIDEnvKey);
     env.envs[EnvironmentKey.LOG_DIR] = logDirName(env, RunState.countOfCallRun);
 
     string dstJobId;
