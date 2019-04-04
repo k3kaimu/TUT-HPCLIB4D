@@ -2,6 +2,8 @@ module tuthpc.cluster;
 
 import std.algorithm;
 import std.conv;
+import std.exception;
+import std.format;
 import std.process;
 
 
@@ -24,14 +26,21 @@ interface ClusterInfo
     static
     ClusterInfo currInstance()
     {
-        if(environment["TUTHPC_CLUSTER_NAME"].startsWith("TUTW"))
+        immutable string envkey = "TUTHPC_CLUSTER_NAME";
+        enforce(envkey in environment , "cannot find environment variable '%s'".format(envkey));
+
+        immutable string envval = environment[envkey];
+
+        if(envval.startsWith("TUTW"))
             return new TUTWInfo();
-        else if(environment["TUTHPC_CLUSTER_NAME"].startsWith("KyotoB"))
+        else if(envval.startsWith("KyotoB"))
             return new KyotoBInfo();
-        else if(environment["TUTHPC_CLUSTER_NAME"].startsWith("LocalPC"))
+        else if(envval.startsWith("LocalPC"))
             return null;
         else
-            enforce(0)
+            enforce(0, "The value of '%s' must be 'LocalPC' or 'TUTW' or 'KyotoB'.");
+
+        return null;
     }
 }
 
