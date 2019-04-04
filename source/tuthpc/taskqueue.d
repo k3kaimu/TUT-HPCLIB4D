@@ -280,7 +280,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         if(jenv.vmem != -1) orange.formattedWrite(",vmem=%sgb", jenv.vmem);
         if(jenv.pvmem != -1) orange.formattedWrite(",pvmem=%sgb", jenv.pvmem);
     } else if(headerID == "QSUB") {
-        orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s,", jenv.nodes, jenv.ppn * jenv.taskGroupSize * 2, jenv.ppn * jenv.taskGroupSize);
+        orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize, (jenv.ppn * jenv.taskGroupSize + 1) / 2);
         if(jenv.mem != -1) orange.formattedWrite(":m=%sG", jenv.mem);
     } else {
         enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
@@ -296,12 +296,16 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     } else if(headerID == "QSUB") {
         int hrs, mins, secs;
         jenv.walltime.split!("hours", "minutes", "seconds")(hrs, mins, secs);
-        orange.formattedWrite("#QSUB -W =%d:%d\n", hrs, mins);
+        orange.formattedWrite("#QSUB -W %d:%d\n", hrs, mins);
     } else {
         enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
     }
 
     orange.formattedWrite("#%s -q %s\n", headerID, jenv.queueName);
+
+    if(cast(KyotoBInfo)cluster !is null) {
+        orange.formattedWrite("#%s -ug gr10061\n", headerID);
+    }
 
     // dependency setting
     if(jenv.dependentJob.length != 0){
@@ -318,9 +322,11 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
                 orange.formattedWrite("%s", jenv.maxSlotSize);
             }
         } else if(headerID == "QSUB") {
-            orange.formattedWrite("#QSUB -J %s-%s\n", 0, jobCount-1);
-            if(jenv.maxSlotSize != 0)
-                writeln("In this cluster, maxSlotSize is ignored.");
+            if(jobCount > 1) {
+                orange.formattedWrite("#QSUB -J %s-%s\n", 0, jobCount-1);
+                if(jenv.maxSlotSize != 0)
+                    writeln("In this cluster, maxSlotSize is ignored.");
+            }
         } else {
             enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
         }
@@ -338,6 +344,12 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     .put(orange, "set -e\n");
     .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
+
+    if(jenv.useArrayJob && headerID == "QSUB" && jobCount == 1) {
+        orange.formattedWrite("export %s=0\n", cluster.arrayIDEnvKey);
+    }
+
+    orange.formattedWrite("export %s=${%s}\n", cast(string)EnvironmentKey.ARRAY_ID, cluster.arrayIDEnvKey);
 
     if(headerID == "PBS")
         .put(orange, "cd $PBS_O_WORKDIR\n");
@@ -391,14 +403,9 @@ struct QueueOverflowProtector
         enforce(cinfo !is null && cinfo.isDevHost);
 
         if(isAnalyzerProcess){
-            if(countOfEnqueuedJobs == -1){
-                countOfEnqueuedJobs = tuthpc.limiter.countOfEnqueuedJobs();
-                enforce(countOfEnqueuedJobs != -1, "Cannot get the number of enqueued jobs.");
-            }
-
             countOfTotalMyJobs += jobSize;
             writefln("ANALYZE: %s jobs are spawned on %s(%s)[%s]", jobSize, file, line, runId);
-            enforce(countOfTotalMyJobs + countOfEnqueuedJobs < 16000,
+            enforce(countOfTotalMyJobs < 8000,
                 "Your jobs may cause queue overflow. Please use env.maxArraySize.");
         }else{
             if(!alreadySpawnAnalyzer){
@@ -578,8 +585,8 @@ if(isTaskList!TL)
     auto cluster = ClusterInfo.currInstance;
     env.useArrayJob = true;
 
-    if(cast(TUTWInfo)cluster !is null && env.nodes == 1 && env.ppn == 1 && env.taskGroupSize == 0){
-        if(taskList.length <= 40)
+    if(cluster !is null && env.nodes == 1 && env.ppn == 1 && env.taskGroupSize == 0){
+        if(taskList.length <= cluster.maxPPN * 2)
             env.taskGroupSize = 1;
         else if(taskList.length < 220)
             env.taskGroupSize = 7;
@@ -709,7 +716,7 @@ PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment
 {
     env.envs[EnvironmentKey.RUN_ID] = runId;
 
-    env.envs[EnvironmentKey.ARRAY_ID] = "${%s}".format(cluster.arrayIDEnvKey);
+    // env.envs[EnvironmentKey.ARRAY_ID] = "${%s}".format(cluster.arrayIDEnvKey);
     env.envs[EnvironmentKey.LOG_DIR] = logDirName(env, RunState.countOfCallRun);
 
     string dstJobId;
