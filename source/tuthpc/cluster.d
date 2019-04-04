@@ -28,8 +28,10 @@ interface ClusterInfo
             return new TUTWInfo();
         else if(environment["TUTHPC_CLUSTER_NAME"].startsWith("KyotoB"))
             return new KyotoBInfo();
+        else if(environment["TUTHPC_CLUSTER_NAME"].startsWith("LocalPC"))
+            return null;
         else
-          return null;
+            enforce(0)
     }
 }
 

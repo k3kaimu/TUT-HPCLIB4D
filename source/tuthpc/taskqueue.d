@@ -129,7 +129,7 @@ class JobEnvironment
         if(isForcedCommandLineArgs)
             this.applyCommandLineArgs(Runtime.args);
 
-        if(queueName is null) queueName = cluster.defaultQueueName;
+        if(cluster !is null && queueName is null) queueName = cluster.defaultQueueName;
         if(ppn == 0) ppn = 1;
         if(nodes == 0) nodes = 1;
 
@@ -143,7 +143,7 @@ class JobEnvironment
             taskGroupSize = 1;
         }
 
-        {
+        if(cluster !is null) {
             int maxMem = (cluster.maxMemGB * 1000 / cluster.maxPPN) * (ppn * taskGroupSize) / 1000,
                 maxMemPerPS = maxMem / (ppn * taskGroupSize);
 
@@ -210,7 +210,7 @@ class JobEnvironment
             jobScript ~= "echo $?";
         }
 
-        if(totalProcessNum == 0) {
+        if(cluster !is null && totalProcessNum == 0) {
             totalProcessNum = cluster.maxPPN * 5;
         }
     }
