@@ -13,7 +13,7 @@ auto pgrepByUser()
     auto result = execute(["pgrep", "-u", uname]);
     enforce(result.status == 0, "pgrep is failed");
 
-    return result.output.splitter("\n").filter!"a.length";
+    return result.output.splitter("\n").filter!"a.length".array();
 }
 
 

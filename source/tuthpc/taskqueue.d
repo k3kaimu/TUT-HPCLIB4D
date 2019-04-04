@@ -399,7 +399,8 @@ Pid spawnTask(in string[] args, JobEnvironment jenv, size_t taskIndex, string lo
     import std.path;
 
     if(nowRunningOnClusterDevelopmentHost() || nowRunningOnClusterComputingNode())
-        enforce(numOfProcessOfUser() <= jenv.totalProcessNum, "Many processes are spawned.");
+        enforce(numOfProcessOfUser() <= jenv.totalProcessNum,
+            "Many processes are spawned.\n Process List:\n%(%s\n%)".format(pgrepByUser()));
 
     string outname = buildPath(logdir, format("stdout_%s.log", taskIndex));
     string errname = buildPath(logdir, format("stderr_%s.log", taskIndex));
