@@ -88,7 +88,12 @@ class KyotoBInfo : ClusterInfo
   {
     string name() { return "KyotoB"; }
     uint maxNode() { return 26; }
-    uint maxPPN() { return 72; }
+    uint maxPPN() {
+        if(this.enableHTT)
+            return 72;
+        else
+            return 36;
+    }
     uint maxMemGB() { return 100; }
     string defaultQueueName() { return "gr10061b"; }
 
@@ -119,4 +124,11 @@ class KyotoBInfo : ClusterInfo
         return Socket.hostName.startsWith("nb-");
     }
   }
+
+
+    bool enableHTT() @property
+    {
+        immutable string envkey = "TUTHPC_ENABLE_HTT";
+        return !(envkey !in environment);
+    }
 }
