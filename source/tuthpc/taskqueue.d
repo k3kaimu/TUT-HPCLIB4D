@@ -137,7 +137,7 @@ class JobEnvironment
             if(cast(TUTWInfo)cluster) { // TUTクラスタかそうでないか
                 taskGroupSize = 11;
             } else {
-                taskGroupSize = 72;
+                taskGroupSize = cluster.maxPPN;
             }
         }else if(nodes != 1 || ppn != 1){
             taskGroupSize = 1;
@@ -279,9 +279,14 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         if(jenv.pmem != -1) orange.formattedWrite(",pmem=%sgb", jenv.pmem);
         if(jenv.vmem != -1) orange.formattedWrite(",vmem=%sgb", jenv.vmem);
         if(jenv.pvmem != -1) orange.formattedWrite(",pvmem=%sgb", jenv.pvmem);
-    } else if(headerID == "QSUB") {
-        orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize, (jenv.ppn * jenv.taskGroupSize + 1) / 2);
-        if(jenv.mem != -1) orange.formattedWrite(":m=%sG", jenv.mem);
+    } else if(auto kyotobInfo = cast(KyotoBInfo)cluster) {
+        auto reqcpus = jenv.ppn * jenv.taskGroupSize;
+        if(kyotobInfo.enableHTT)
+            orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, reqcpus, (reqcpus + 1) / 2);
+        else
+            orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, reqcpus, reqcpus);
+
+        if(jenv.pmem != -1) orange.formattedWrite(":m=%sG", jenv.pmem);
     } else {
         enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
     }
