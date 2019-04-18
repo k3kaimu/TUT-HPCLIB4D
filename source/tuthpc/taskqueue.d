@@ -133,13 +133,13 @@ class JobEnvironment
         if(ppn == 0) ppn = 1;
         if(nodes == 0) nodes = 1;
 
-        if(nodes == 1 && ppn == 1 && taskGroupSize == 0) {
+        if(cluster !is null && nodes == 1 && ppn == 1 && taskGroupSize == 0) {
             if(cast(TUTWInfo)cluster) { // TUTクラスタかそうでないか
                 taskGroupSize = 11;
             } else {
                 taskGroupSize = cluster.maxPPN;
             }
-        }else if(nodes != 1 || ppn != 1){
+        }else if(cluster is null || nodes != 1 || ppn != 1){
             taskGroupSize = 1;
         }
 
