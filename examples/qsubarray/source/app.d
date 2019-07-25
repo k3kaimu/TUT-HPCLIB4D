@@ -64,6 +64,10 @@ void main(string[] args)
             }
         }
     }
+
+    foreach(line; pipes.stderr.byLine)
+        stderr.writeln(line);
+
     writeln("Waiting process termination...");
     wait(pipes.pid);
 }
