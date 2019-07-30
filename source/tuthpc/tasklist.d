@@ -165,11 +165,13 @@ auto uniqueTaskAppender(Args...)(void function(Args) fp) { return new UniqueTask
 
 unittest
 {
+    import std.range;
+
     int[][int] arrAA;
 
     auto app = uniqueTaskAppender((int a){ arrAA[a] ~= a; });
 
-    .put(app, iota(10).chain(iota(10)));
+    std.range.put(app, iota(10).chain(iota(10)));
     assert(app.length == 10);
     foreach(i; 0 .. app.length)
         app[i]();
@@ -181,6 +183,8 @@ unittest
 
 unittest
 {
+    import std.range;
+
     struct S { int f; }
     struct ComplexData
     {
@@ -203,7 +207,7 @@ unittest
     }
 
     auto app = uniqueTaskAppender(function(ComplexData d){  });
-    .put(app, args);
+    std.range.put(app, args);
 
     assert(app.length == 1);
 }
