@@ -5,5 +5,8 @@
     ],
     "description": "A small library for TUT-HPC.",
     "copyright": "Copyright © 2016, Kazuki Komatsu",
-    "license": "NYSL"
+    "license": "NYSL",
+    "dependencies": {
+        "msgpack-d": "~>1.0.1"
+    }
 }
