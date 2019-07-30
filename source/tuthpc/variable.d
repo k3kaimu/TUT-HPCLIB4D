@@ -44,6 +44,9 @@ if(isMessagePackable!T)
     }
 
 
+    alias get this;
+
+
     ref T get()
     {
         return _payload._value;
@@ -111,34 +114,34 @@ unittest
         std.file.remove(filename);
 
     va = 1;
-    assert(va.get == 1);
+    assert(va == 1);
 
     va = 2;
-    assert(va.get == 2);
+    assert(va == 2);
     destroy(va);
 
     auto vb = OnDiskVariable!int(filename, Yes.isReadOnly);
-    assert(vb.get == 2);
+    assert(vb == 2);
 
     vb = 3;
     destroy(vb);
 
     auto vc = OnDiskVariable!int(filename);
-    assert(vc.get == 2);
+    assert(vc == 2);
 
     vc = 3;
     auto vd = vc;
     destroy(vc);
-    assert(vd.get == 3);
+    assert(vd == 3);
 
     auto ve = OnDiskVariable!int(filename, Yes.isReadOnly);
-    assert(ve.get == 2);
+    assert(ve == 2);
     destroy(ve);
 
     destroy(vd);
 
     auto vf = OnDiskVariable!int(filename, Yes.isReadOnly);
-    assert(vf.get == 3);
+    assert(vf == 3);
 }
 
 unittest
@@ -155,12 +158,9 @@ unittest
         string[] names;
     }
 
-    MyData data;
-    data.array = [1, 2, 3];
-    data.names = ["AAA", "BBB"];
-
     auto va = OnDiskVariable!MyData(filename);
-    va = data;
+    va.array = [1, 2, 3];
+    va.names = ["AAA", "BBB"];
 
     assert(!exists(filename));
     va.flush();
@@ -171,5 +171,5 @@ unittest
     vb.flush();
 
     va.fetch();
-    assert(va.get.array == [1, 2, 3, 4]);
+    assert(va.array == [1, 2, 3, 4]);
 }
