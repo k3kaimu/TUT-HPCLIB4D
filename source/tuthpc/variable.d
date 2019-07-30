@@ -2,6 +2,7 @@ module tuthpc.variable;
 
 import std.algorithm : move;
 import std.file;
+import std.stdio : File;
 import std.typecons;
 import msgpack;
 
@@ -97,11 +98,11 @@ if(isMessagePackable!T)
 
         void flush()
         {
-            auto bin = msgpack.pack!withFieldName(_value);
-            std.file.write(_filename, bin);
+            File file = File(_filename, "w");
+            auto p = packer(file.lockingBinaryWriter, withFieldName);
+            p.pack(_value);
         }
     }
-}
 }
 
 //
