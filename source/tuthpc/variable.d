@@ -27,7 +27,7 @@ unittest
 ファイルからの読み出しはインスタンス作成時のみ実行されます．
 また，ファイルへの書き出しはインスタンスの破棄時のみ実行されます．
 */
-struct OnDiskVariable(T)
+struct OnDiskVariable(T, Flag!"withFieldName" withFieldName = Yes.withFieldName)
 if(isMessagePackable!T)
 {
     /**
@@ -39,9 +39,8 @@ if(isMessagePackable!T)
 
         _payload._filename = filename;
         _payload._isReadOnly = isReadOnly;
-        if(exists(filename)) {
-            _payload._value = msgpack.unpack!T(cast(ubyte[]) std.file.read(filename));
-        }
+        if(exists(filename))
+            fetch();
     }
 
 
@@ -54,6 +53,18 @@ if(isMessagePackable!T)
     void opAssign(T t)
     {
         _payload._value = t;
+    }
+
+
+    void fetch()
+    {
+        _payload.fetch();
+    }
+
+
+    void flush()
+    {
+        _payload.flush();
     }
 
 
@@ -70,11 +81,24 @@ if(isMessagePackable!T)
         ~this()
         {
             if(_filename !is null && !_isReadOnly) {
-                auto bin = msgpack.pack(_value);
-                std.file.write(_filename, bin);
+                this.flush();
             }
         }
+
+
+        void fetch()
+        {
+            msgpack.unpack!withFieldName(cast(ubyte[]) std.file.read(_filename), _value);
+        }
+
+
+        void flush()
+        {
+            auto bin = msgpack.pack!withFieldName(_value);
+            std.file.write(_filename, bin);
+        }
     }
+}
 }
 
 //
@@ -115,4 +139,37 @@ unittest
 
     auto vf = OnDiskVariable!int(filename, Yes.isReadOnly);
     assert(vf.get == 3);
+}
+
+unittest
+{
+    string filename = "remove_this_file.bin";
+    scope(exit) {
+        assert(exists(filename));
+        std.file.remove(filename);
+    }
+
+    static struct MyData
+    {
+        int[] array;
+        string[] names;
+    }
+
+    MyData data;
+    data.array = [1, 2, 3];
+    data.names = ["AAA", "BBB"];
+
+    auto va = OnDiskVariable!MyData(filename);
+    va = data;
+
+    assert(!exists(filename));
+    va.flush();
+    assert(exists(filename));
+
+    auto vb = OnDiskVariable!MyData(filename);
+    vb.array ~= 4;
+    vb.flush();
+
+    va.fetch();
+    assert(va.get.array == [1, 2, 3, 4]);
 }
