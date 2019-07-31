@@ -1,10 +1,12 @@
 module tuthpc.variable;
 
+import msgpack;
 import std.algorithm : move;
 import std.file;
+import std.format;
+import std.range;
 import std.stdio : File;
 import std.typecons;
-import msgpack;
 
 
 private
@@ -84,6 +86,15 @@ if(isMessagePackable!T)
     void flush()
     {
         _payload.flush();
+    }
+
+
+    void toString(OutputRange)(ref OutputRange writer) const
+    {
+        if(_payload._isNull)
+            .put(writer, "null");
+        else
+            formattedWrite(writer, "%s", _payload._value);
     }
 
 
