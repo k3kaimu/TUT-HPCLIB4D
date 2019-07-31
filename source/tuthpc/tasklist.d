@@ -8,7 +8,10 @@ enum bool isTaskList(TL) = is(typeof((TL taskList){
 }));
 
 
-final class MultiTaskList
+alias ReturnTypeOfTaskList(TL) = typeof(TL.init[0]());
+
+
+final class MultiTaskList(T = void)
 {
     this() {}
 
@@ -20,7 +23,7 @@ final class MultiTaskList
     }
 
 
-    void delegate() opIndex(size_t idx)
+    T delegate() opIndex(size_t idx)
     {
         return _tasks[idx];
     }
@@ -30,28 +33,28 @@ final class MultiTaskList
 
 
     void opOpAssign(string op : "~", TL)(TL taskList)
-    if(isTaskList!TL)
+    if(isTaskList!TL && is(ReturnTypeOfTaskList!TL == T))
     {
         foreach(i; 0 .. taskList.length){
-            this.append(function(typeof(taskList[0]) fn){ fn(); }, taskList[i]);
+            this.append(function(typeof(taskList[0]) fn){ return fn(); }, taskList[i]);
         }
     }
 
 
   private:
-    void delegate()[] _tasks;
+    T delegate()[] _tasks;
 }
 
 
-void append(F, T...)(MultiTaskList list, F func, T args)
+void append(R, F, T...)(MultiTaskList!R list, F func, T args)
 {
-    list._tasks ~= delegate() { func(args); };
+    list._tasks ~= delegate() { return func(args); };
 }
 
 
-void append(alias func, T...)(MultiTaskList list, T args)
+void append(alias func, R, T...)(MultiTaskList!R list, T args)
 {
-    list._tasks ~= delegate() { func(args); };
+    list._tasks ~= delegate() { return func(args); };
 }
 
 

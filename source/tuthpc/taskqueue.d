@@ -6,12 +6,14 @@ import tuthpc.mail;
 import tuthpc.cluster;
 public import tuthpc.tasklist;
 import tuthpc.limiter;
+import tuthpc.variable;
 
 import std.algorithm;
 import std.ascii;
 import std.conv;
 import std.datetime;
 import std.digest.crc;
+import std.digest.sha;
 import std.exception;
 import std.format;
 import std.file;
@@ -39,7 +41,12 @@ string hashOfExe()
 {
     import std.file;
 
-    return crc32Of(cast(ubyte[])std.file.read(Runtime.args[0])).toHexString.dup;
+    static string result;
+    if(result is null) {
+        result = crc32Of(cast(ubyte[])std.file.read(Runtime.args[0])).toHexString.dup;
+    }
+
+    return result;
 }
 
 
@@ -87,6 +94,7 @@ class JobEnvironment
     //bool isEnabledSpawnNewProcess = true;   /// 各タスクは新しいプロセスを起動する
     size_t totalProcessNum = 0;
     string logdir;              /// 各タスクの標準出力，標準エラーを保存するディレクトリを指定できる
+    bool isShowMode = false;    /// 各タスクの実行結果を表示するためのモード
 
 
 
@@ -114,7 +122,8 @@ class JobEnvironment
             "th:requireUserCheck", &isEnabledUserCheckBeforePush,
             "th:maxProcessNum|th:plim", &totalProcessNum,
             "th:forceCommandLineArgs", &isForcedCommandLineArgs,
-            "th:logdir", &logdir
+            "th:logdir", &logdir,
+            "th:show", &isShowMode
         );
 
         if(walltime_int != -1)
@@ -380,10 +389,15 @@ struct RunState
 }
 
 
-struct PushResult
+struct PushResult(T)
 {
     Flag!"isAborted" isAborted;     // ユーザーによりジョブを投げるのが中止された
     string jobId;
+
+    static if(!is(T == void))
+    {
+        OnDiskVariable!T[] retvals;
+    }
 }
 
 
@@ -435,6 +449,12 @@ string logDirName(in JobEnvironment env, size_t runId)
         return env.logdir;
     else
         return format("logs_%s_%s", hashOfExe(), runId);
+}
+
+
+string makeOnDiskVariableName(size_t taskIndex)
+{
+    return "retval_%s.bin".format(taskIndex);
 }
 
 
@@ -524,7 +544,7 @@ void copyLogTextToStdOE(int status, JobEnvironment jenv, size_t taskIndex, strin
 }
 
 
-void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSize, R taskIndxs, TL taskList, string logdir, string file, size_t line, string[string] addEnvs = null)
+void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSize, size_t runId, R taskIndxs, TL taskList, string logdir, string file, size_t line, string[string] addEnvs = null)
 {
     import std.path;
     import std.process;
@@ -542,7 +562,14 @@ void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSiz
             //stderr.writeln(ex);
         }
 
-        taskList[taskIndex]();
+        alias ReturnType = typeof(taskList[taskIndex]());
+
+        static if(is(ReturnType == void))
+            taskList[taskIndex]();
+        else { 
+            auto var = OnDiskVariable!ReturnType(buildPath(logdir, makeOnDiskVariableName(taskIndex)));
+            var = taskList[taskIndex]();
+        }
     }else{
         enforce(exists(logdir));
 
@@ -582,11 +609,12 @@ void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSiz
 }
 
 
-PushResult run(TL)(TL taskList, in JobEnvironment envIn = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
+PushResult!(ReturnTypeOfTaskList!TL) run(TL)(TL taskList, in JobEnvironment envIn = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
 if(isTaskList!TL)
 {
-    auto env = envIn.dup;
+    alias ReturnType = ReturnTypeOfTaskList!TL;
 
+    auto env = envIn.dup;
     auto cluster = ClusterInfo.currInstance;
     env.useArrayJob = true;
 
@@ -601,7 +629,7 @@ if(isTaskList!TL)
 
     env.autoSetting();
 
-    PushResult result;
+    PushResult!ReturnType result;
     immutable nowInRunOld = RunState.nowInRun;
 
     RunState.nowInRun = true;
@@ -616,6 +644,9 @@ if(isTaskList!TL)
         arrayJobSize = env.maxArraySize;
 
     immutable logdir = logDirName(env, RunState.countOfCallRun);
+
+    if(env.isShowMode)
+        goto Lreturn;
 
     if(cluster !is null && cluster.isDevHost)
     {
@@ -640,18 +671,19 @@ if(isTaskList!TL)
             auto userInput = readln().chomp;
             if(userInput != "y" && userInput != "Y"){
                 writeln("This submission is aborted by the user.\n");
-                return PushResult(Yes.isAborted, "");
+                return typeof(return)(Yes.isAborted, "");
             }
         }
 
-        import std.file : mkdir;
-        mkdir(logdir);
+        import std.file : mkdirRecurse, exists;
+        if(!exists(logdir))
+            mkdirRecurse(logdir);
 
         // 実行ファイルのコピー
         env.copyExeFile();
 
         // ジョブを投げる
-        result = pushArrayJobToQueue(
+        result = pushArrayJobToQueue!(ReturnType)(
             RunState.countOfCallRun.to!string,
             arrayJobSize, env, cluster,
             file, line);
@@ -680,13 +712,24 @@ if(isTaskList!TL)
                 for(size_t taskIndex = index + p; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize)
                     taskIndexList ~= taskIndex;
 
-            processTasks(Runtime.args, env, env.taskGroupSize, taskIndexList, taskList, logdir, file, line);
+            processTasks(Runtime.args, env, env.taskGroupSize, RunState.countOfCallRun, taskIndexList, taskList, logdir, file, line);
         }
     }
     else if(nowInRunOld == true)
     {
-        foreach(i; 0 .. taskList.length)
-            taskList[i]();
+        static if(is(ReturnType == void))
+        {
+            foreach(i; 0 .. taskList.length)
+                taskList[i]();
+        }
+        else
+        {
+            foreach(i; 0 .. taskList.length) {
+                auto var = OnDiskVariable!ReturnType(null, Yes.isReadOnly);
+                var = taskList[i]();
+                result.retvals ~= var;
+            }
+        }
     }
     else
     {
@@ -708,16 +751,24 @@ if(isTaskList!TL)
         uint parallelSize = std.parallelism.totalCPUs / env.ppn;
         env.envs[EnvironmentKey.RUN_ID] = RunState.countOfCallRun.to!string;
         env.envs[EnvironmentKey.LOG_DIR] = logdir;
-        processTasks(env.renamedExePath ~ Runtime.args[1 .. $], env, parallelSize, iota(taskList.length), taskList, logdir, file, line, env.envs);
+        processTasks(env.renamedExePath ~ Runtime.args[1 .. $], env, parallelSize, RunState.countOfCallRun, iota(taskList.length), taskList, logdir, file, line, env.envs);
     }
 
   Lreturn:
+    static if(!is(ReturnType == void))
+    {
+        if(taskList.length != 0 && result.retvals.length == 0) {
+            foreach(i; 0 .. taskList.length)
+                result.retvals ~= OnDiskVariable!ReturnType(buildPath(logdir, makeOnDiskVariableName(i)), Yes.isReadOnly);
+        }
+    }
+
     return result;
 }
 
 
 private
-PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment env, ClusterInfo cluster, string file, size_t line)
+PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnvironment env, ClusterInfo cluster, string file, size_t line)
 {
     env.envs[EnvironmentKey.RUN_ID] = runId;
 
@@ -751,7 +802,7 @@ PushResult pushArrayJobToQueue(string runId, size_t arrayJobSize, JobEnvironment
         dstJobId = pipes.stdout.byLine.front.split('.')[0].array().to!string;
     }
 
-    return PushResult(No.isAborted, dstJobId);
+    return typeof(return)(No.isAborted, dstJobId);
 }
 
 

@@ -5,33 +5,35 @@ import std.format;
 import std.typecons;
 
 
-void main(string[] args)
-{
-    bool isResultShowMode;
-    if(args.length > 1 && args[1] == "show")
-        isResultShowMode = true;
-    else
-        isResultShowMode = false;
+/**
+# when you want to submit job
+./variable_test
 
-    auto taskList = new MultiTaskList();
-    OnDiskVariable!int[] results;
+# when you want to show results
+./variable_test --th:show
+*/
+void main()
+{
+    auto env = defaultJobEnvironment();
+
+    auto taskList = new MultiTaskList!int();
 
     foreach(i; 0 .. 10) {
-        results ~= OnDiskVariable!int(
-                "data%s.bin".format(i)
-            );
-
         taskList.append((size_t i) {
-            results[i] = cast(int) i^^2;
+            return cast(int) i^^2;
         }, i);
     }
 
-    if(isResultShowMode) {
-        foreach(i, ref e; results) {
-            writefln!"%s: %s"(i, e.get);
+    // ジョブ投入 & 実行
+    auto res = taskList.run(env);
+
+    // ジョブの実行結果の表示
+    if(env.isShowMode) {
+        foreach(i, e; res.retvals){
+            if(e.isNull)
+                writefln!"%s: null"(i);
+            else
+                writefln!"%s: %s"(i, e.get);
         }
-    }
-    else {
-        taskList.run();
     }
 }

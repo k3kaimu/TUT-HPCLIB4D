@@ -40,12 +40,25 @@ if(isMessagePackable!T)
 
         _payload._filename = filename;
         _payload._isReadOnly = isReadOnly;
+        _payload._isNull = true;
         if(exists(filename))
             fetch();
     }
 
 
     alias get this;
+
+
+    string path()
+    {
+        return _payload._filename;
+    }
+
+
+    bool isNull()
+    {
+        return _payload._isNull;
+    }
 
 
     ref T get()
@@ -57,6 +70,7 @@ if(isMessagePackable!T)
     void opAssign(T t)
     {
         _payload._isModified = true;
+        _payload._isNull = false;
         _payload._value = t;
     }
 
@@ -83,14 +97,16 @@ if(isMessagePackable!T)
         bool _isReadOnly;
         T _value;
         bool _isModified;
+        bool _isNull;
 
         ~this()
         {
-            if(_filename !is null && !_isReadOnly && _isModified) {
+            if(_filename !is null && !_isReadOnly && _isModified && !_isNull) {
                 this.flush();
             }
             _isModified = false;
             _filename = null;
+            _isNull = true;
         }
 
 
@@ -100,11 +116,14 @@ if(isMessagePackable!T)
             auto alloc = Mallocator.instance;
             
             File file = File(_filename, "r");
+            if(file.size == 0) return;
             auto buf = cast(ubyte[])alloc.allocate(file.size);
             scope(exit) alloc.deallocate(buf);
 
             file.rawRead(buf);
             msgpack.unpack!withFieldName(buf, _value);
+            _isNull = false;
+            _isModified = false;
         }
 
 
@@ -113,6 +132,8 @@ if(isMessagePackable!T)
             File file = File(_filename, "w");
             auto p = packer(file.lockingBinaryWriter, withFieldName);
             p.pack(_value);
+            _isNull = false;
+            _isModified = false;
         }
     }
 }
