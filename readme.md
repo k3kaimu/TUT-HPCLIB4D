@@ -20,7 +20,7 @@ void main()
     auto env = defaultJobEnvironment();
 
     // ジョブスケジューラに投げるジョブリスト
-    auto taskList = new MultiTaskList();
+    auto taskList = new MultiTaskList!void();
 
     // ジョブ1
     // スケジューラに投げるジョブを追加する
@@ -63,7 +63,7 @@ void main()
     auto env = defaultJobEnvironment();
 
     // ジョブスケジューラに投げるジョブリスト
-    auto taskList = new MultiTaskList();
+    auto taskList = new MultiTaskList!void();
 
     // 実行ホストのホスト名を使用する
     // 実行される計算機によってはホスト名が異なるため，
