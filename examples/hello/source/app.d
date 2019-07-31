@@ -7,7 +7,7 @@ void main()
     auto env = defaultJobEnvironment;
 
     {
-        auto list = new MultiTaskList();
+        auto list = new MultiTaskList!void();
         foreach(i; 0 .. 16)
             foreach(j; 0 .. 16)
                 list.append!writefln("Hello, TUTHPCLib4D! %s", i);
@@ -16,7 +16,7 @@ void main()
         run(list, env);
     }
     {
-        auto list = uniqueTaskAppender((size_t i){ writefln("Hello, TUTHPCLib4D! %s", i); });
+        auto list = uniqueTaskAppender!void((size_t i){ writefln("Hello, TUTHPCLib4D! %s", i); });
         foreach(i; 0 .. 16)
             foreach(j; 0 .. 16)
                 list.append(i);
@@ -25,10 +25,10 @@ void main()
         run(list, env);
     }
     {
-        auto list = new MultiTaskList();
+        auto list = new MultiTaskList!void();
         foreach(i; 0 .. 16)
             list.append((size_t i){
-                auto list2 = new MultiTaskList();
+                auto list2 = new MultiTaskList!void();
                 foreach(j; 0 .. 16)
                     list2.append!writefln("Hello, TUTHPCLib4D! %s:%s", i, j);
 
@@ -39,7 +39,7 @@ void main()
     }
     {
         foreach(i; 0 .. 2){
-            auto list = new MultiTaskList();
+            auto list = new MultiTaskList!void();
             list.append!writefln("Hello, TUTHPCLib4D! %s", i);
             run(list, env);
         }
@@ -62,7 +62,7 @@ void main()
             writefln("Hello, TUTHPCLib4D! %s %s", i, e);
     }
     {
-        auto taskList = new MultiTaskList();
+        auto taskList = new MultiTaskList!void();
         foreach(e; iota(16).appendAsTasks(taskList))
             writefln("Hello, TUTHPCLib4D! %s", e);
 

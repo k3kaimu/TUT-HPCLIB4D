@@ -105,15 +105,15 @@ unittest
 }
 
 
-final class UniqueTaskAppender(Args...)
+final class UniqueTaskAppender(R, Args...)
 {
-    this(void delegate(Args) dg)
+    this(R delegate(Args) dg)
     {
         _dg = dg;
     }
 
 
-    this(void function(Args) fp)
+    this(R function(Args) fp)
     {
         import std.functional : toDelegate;
 
@@ -145,25 +145,25 @@ final class UniqueTaskAppender(Args...)
 
 
   private:
-    void delegate(Args) _dg;
+    R delegate(Args) _dg;
     ArgsType[] _list;
     bool[ArgsType] _set;
 
     static struct ArgsType { Args args; }
     static struct Caller
     {
-        void delegate(Args) _dg;
+        R delegate(Args) _dg;
         ArgsType _args;
 
-        void opCall(){ _dg(_args.args); }
+        R opCall(){ return _dg(_args.args); }
     }
 }
 
 
-auto uniqueTaskAppender(Args...)(void delegate(Args) dg) { return new UniqueTaskAppender!Args(dg); }
+auto uniqueTaskAppender(R, Args...)(R delegate(Args) dg) { return new UniqueTaskAppender!(R, Args)(dg); }
 
 
-auto uniqueTaskAppender(Args...)(void function(Args) fp) { return new UniqueTaskAppender!Args(fp); }
+auto uniqueTaskAppender(R, Args...)(R function(Args) fp) { return new UniqueTaskAppender!(R, Args)(fp); }
 
 
 unittest
@@ -172,7 +172,7 @@ unittest
 
     int[][int] arrAA;
 
-    auto app = uniqueTaskAppender((int a){ arrAA[a] ~= a; });
+    auto app = uniqueTaskAppender!void((int a){ arrAA[a] ~= a; });
 
     std.range.put(app, iota(10).chain(iota(10)));
     assert(app.length == 10);
@@ -209,7 +209,7 @@ unittest
         args ~= data;
     }
 
-    auto app = uniqueTaskAppender(function(ComplexData d){  });
+    auto app = uniqueTaskAppender!void(function(ComplexData d){  });
     std.range.put(app, args);
 
     assert(app.length == 1);

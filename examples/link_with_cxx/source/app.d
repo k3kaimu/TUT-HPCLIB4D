@@ -15,7 +15,7 @@ void main()
     auto env = defaultJobEnvironment;
     env.queueName = "wEduq";
 
-    auto taskList = new MultiTaskList();
+    auto taskList = new MultiTaskList!void();
 
     foreach(i; 0 .. 100)
         taskList.append(&func_job, 1.0, 2.0, i);

@@ -290,9 +290,9 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         if(jenv.pvmem != -1) orange.formattedWrite(",pvmem=%sgb", jenv.pvmem);
     } else if(auto kyotobInfo = cast(KyotoBInfo)cluster) {
         auto reqcpus = jenv.ppn * jenv.taskGroupSize;
-        if(kyotobInfo.enableHTT)
-            orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, reqcpus, (reqcpus + 1) / 2);
-        else
+        if(kyotobInfo.enableHTT){
+            orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, (reqcpus + 1) / 2 * 2, (reqcpus + 1) / 2);
+        }else
             orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, reqcpus, reqcpus);
 
         if(jenv.pmem != -1) orange.formattedWrite(":m=%sG", jenv.pmem);
@@ -834,9 +834,9 @@ template toTasks(alias fn)
     if(isInputRange!R)
     {
         static if(hasLength!R && isRandomAccessRange!R)
-            return range.map!(a => { fn(a); });
+            return range.map!(a => { return fn(a); });
         else
-            return range.array().map!(a => { fn(a); });
+            return range.array().map!(a => { return fn(a); });
     }
 }
 
@@ -866,9 +866,9 @@ if(isInputRange!R)
         int opApply(int delegate(ref E) dg)
         {
             //int result = 0;
-            MultiTaskList taskList = new MultiTaskList();
+            auto taskList = new MultiTaskList!void();
             for(size_t i = 0; !_range.empty;){
-                taskList.append(dg, _range.front);
+                taskList.append((E e){ dg(e); }, _range.front);
                 ++i;
                 _range.popFront;
             }
@@ -881,9 +881,9 @@ if(isInputRange!R)
 
         int opApply(int delegate(ref size_t, ref E) dg)
         {
-            MultiTaskList taskList = new MultiTaskList();
+            auto taskList = new MultiTaskList!void();
             for(size_t i = 0; !_range.empty;){
-                taskList.append(dg, i, _range.front);
+                taskList.append((size_t i, E e){ dg(i, e); }, i, _range.front);
                 ++i;
                 _range.popFront;
             }
@@ -904,7 +904,7 @@ if(isInputRange!R)
 }
 
 
-auto appendAsTasks(R)(R range, MultiTaskList taskList)
+auto appendAsTasks(R)(R range, MultiTaskList!void taskList)
 if(isInputRange!R)
 {
     static struct AppendAsTasksResult
@@ -914,7 +914,7 @@ if(isInputRange!R)
         int opApply(int delegate(ref E) dg)
         {
             for(size_t i = 0; !_range.empty;){
-                _taskList.append(dg, _range.front);
+                _taskList.append((E e){ dg(e); }, _range.front);
                 ++i;
                 _range.popFront;
             }
@@ -926,7 +926,7 @@ if(isInputRange!R)
         int opApply(int delegate(ref size_t, ref E) dg)
         {
             for(size_t i = 0; !_range.empty;){
-                _taskList.append(dg, i, _range.front);
+                _taskList.append((size_t i, E e) { dg(i, e); }, i, _range.front);
                 ++i;
                 _range.popFront;
             }
@@ -936,7 +936,7 @@ if(isInputRange!R)
 
       private:
         R _range;
-        MultiTaskList _taskList;
+        MultiTaskList!void _taskList;
     }
 
 
