@@ -92,7 +92,15 @@ if(isMessagePackable!T)
 
         void fetch()
         {
-            msgpack.unpack!withFieldName(cast(ubyte[]) std.file.read(_filename), _value);
+            import std.experimental.allocator.mallocator;
+            auto alloc = Mallocator.instance;
+            
+            File file = File(_filename, "r");
+            auto buf = cast(ubyte[])alloc.allocate(file.size);
+            scope(exit) alloc.deallocate(buf);
+
+            file.rawRead(buf);
+            msgpack.unpack!withFieldName(buf, _value);
         }
 
 
