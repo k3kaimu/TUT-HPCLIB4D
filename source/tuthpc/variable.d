@@ -56,6 +56,7 @@ if(isMessagePackable!T)
 
     void opAssign(T t)
     {
+        _payload._isModified = true;
         _payload._value = t;
     }
 
@@ -81,12 +82,15 @@ if(isMessagePackable!T)
         string _filename;
         bool _isReadOnly;
         T _value;
+        bool _isModified;
 
         ~this()
         {
-            if(_filename !is null && !_isReadOnly) {
+            if(_filename !is null && !_isReadOnly && _isModified) {
                 this.flush();
             }
+            _isModified = false;
+            _filename = null;
         }
 
 
