@@ -1,0 +1,12 @@
+{
+	"authors": [
+		"Kazuki Komatsu"
+	],
+	"copyright": "Copyright © 2019, Kazuki Komatsu",
+	"description": "A minimal D application.",
+	"license": "NYSL",
+	"name": "variable_test",
+	"dependencies": {
+        "tuthpc": { "path": "../.." }
+    }
+}
