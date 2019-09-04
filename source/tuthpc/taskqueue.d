@@ -818,28 +818,29 @@ PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnviro
 
 template afterRunImpl(DependencySetting ds)
 {
-    PushResult!(ReturnTypeOfTaskList!TL) afterRunImpl(X, TL)(PushResult!X parentJob, TL taskList, JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
+    PushResult!(ReturnTypeOfTaskList!TL) afterRunImpl(X, TL)(PushResult!X parentJob, TL taskList, in JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
     if(isTaskList!TL)
     {
+        auto newenv = env.dup;
+
         if(parentJob.isAborted) {
             writeln("%s(%s): This job is aborted because the parent job of this job is aborted.", file, line);
             return typeof(return)(Yes.isAborted, "");
         }
 
-        env.dependentJob = parentJob.jobId;
-        env.dependencySetting = ds;
+        newenv.dependentJob = parentJob.jobId;
+        newenv.dependencySetting = ds;
 
         auto cluster = ClusterInfo.currInstance;
         if(auto kyotobInfo = cast(KyotoBInfo)cluster) {
-            auto newenv = env.dup;
             newenv.autoSetting();
             runOnlyMainProcessOnDevHost({
-                env.dependentJob = submitMonitoringJob(parentJob.jobId, newenv.queueName, cluster);
-                env.dependencySetting = DependencySetting.success_single;
+                newenv.dependentJob = submitMonitoringJob(parentJob.jobId, newenv.queueName, cluster);
+                newenv.dependencySetting = DependencySetting.success_single;
             });
         }
 
-        return run(taskList, env, file, line);
+        return run(taskList, newenv, file, line);
     }
 }
 
