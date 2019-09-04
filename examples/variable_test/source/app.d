@@ -17,32 +17,33 @@ import tuthpc.variable;
 */
 void main()
 {
-    {
-        auto env = defaultJobEnvironment();
+    auto env = defaultJobEnvironment();
 
-        auto taskList = new MultiTaskList!int();
+    auto firstTasks = new MultiTaskList!int();
 
-        foreach(i; 0 .. 10) {
-            taskList.append((size_t i) {
-                return cast(int) i^^2;
-            }, i);
-        }
-
-        // ジョブ投入 & 実行
-        auto res = taskList.run(env);
-
-        // ジョブの実行結果の表示
-        if(env.isShowMode) {
-            foreach(i, e; res.retvals){
-                if(e.isNull)
-                    writefln!"%s: null"(i);
-                else
-                    writefln!"%s: %s"(i, e.get);
-            }
-        }
+    foreach(i; 0 .. 10) {
+        firstTasks.append((size_t i) {
+            return cast(int) i^^2;
+        }, i);
     }
 
-    {
-        iota(10).toTasks!(a => a^^2).run().retvals.writeln();
+    // ジョブ投入 & 実行
+    auto res = firstTasks.run(env);
+
+
+    auto secondTasks = new MultiTaskList!void();
+    foreach(i; 0 .. 10) {
+        secondTasks.append((size_t i) {
+            writeln(res.retvals[i].path);
+            writeln(res.retvals[i]);
+        }, i);
+    }
+
+    // 最初のジョブの後に実行
+    res.afterSuccessRun(secondTasks);
+
+    writeln(res);
+    foreach(i; 0 .. 10) {
+        writeln(res.retvals[i].path);
     }
 }

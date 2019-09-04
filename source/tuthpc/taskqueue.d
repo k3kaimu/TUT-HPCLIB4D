@@ -32,7 +32,6 @@ enum EnvironmentKey : string
     ARRAY_ID = "TUTHPC_JOB_ENV_ARRAY_ID",
     TASK_ID = "TUTHPC_JOB_ENV_TASK_ID",
     PBS_JOBID = "PBS_JOBID",
-    LOG_DIR = "TUTHPC_LOG_DIR",
     EMAIL_ADDR = "TUTHPC_EMAIL_ADDR",
 }
 
@@ -55,6 +54,9 @@ enum DependencySetting
     success = "afterokarray",
     failure = "afternotokarray",
     exit = "afteranyarray",
+    success_single = "afterok",
+    failure_single = "afternotok",
+    exit_single = "afterany",
 }
 
 
@@ -321,11 +323,6 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         orange.formattedWrite("#%s -ug gr10061\n", headerID);
     }
 
-    // dependency setting
-    if(jenv.dependentJob.length != 0){
-        orange.formattedWrite("#%s -W depend=%s:%s\n", headerID, cast(string)jenv.dependencySetting, jenv.dependentJob);
-    }
-
     // array job
     if(jenv.useArrayJob) {
         if(headerID == "PBS") {
@@ -443,9 +440,7 @@ struct QueueOverflowProtector
 
 string logDirName(in JobEnvironment env, size_t runId)
 {
-    if(EnvironmentKey.LOG_DIR in environment)
-        return environment[EnvironmentKey.LOG_DIR];
-    else if(env.logdir.length != 0)
+    if(env.logdir.length != 0)
         return env.logdir;
     else
         return format("logs_%s_%s", hashOfExe(), runId);
@@ -609,6 +604,18 @@ void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSiz
 }
 
 
+/**
+実行環境がクラスタ計算機の開発ノードであり，かつ，OverflowProtectionなどで起動されるプロセスでないなら実行する
+*/
+void runOnlyMainProcessOnDevHost(void delegate() dg)
+{
+    auto cluster = ClusterInfo.currInstance;
+    if(cluster !is null && cluster.isDevHost && !QueueOverflowProtector.isAnalyzerProcess) {
+        dg();
+    }
+}
+
+
 PushResult!(ReturnTypeOfTaskList!TL) run(TL)(TL taskList, in JobEnvironment envIn = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
 if(isTaskList!TL)
 {
@@ -750,7 +757,6 @@ if(isTaskList!TL)
 
         uint parallelSize = std.parallelism.totalCPUs / env.ppn;
         env.envs[EnvironmentKey.RUN_ID] = RunState.countOfCallRun.to!string;
-        env.envs[EnvironmentKey.LOG_DIR] = logdir;
         processTasks(env.renamedExePath ~ Runtime.args[1 .. $], env, parallelSize, RunState.countOfCallRun, iota(taskList.length), taskList, logdir, file, line, env.envs);
     }
 
@@ -772,10 +778,13 @@ PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnviro
 {
     env.envs[EnvironmentKey.RUN_ID] = runId;
 
-    // env.envs[EnvironmentKey.ARRAY_ID] = "${%s}".format(cluster.arrayIDEnvKey);
-    env.envs[EnvironmentKey.LOG_DIR] = logDirName(env, RunState.countOfCallRun);
-
     string dstJobId;
+    string[] qsubcommands = ["qsub"];
+    if(env.dependentJob.length != 0) {
+        qsubcommands ~= "-W";
+        qsubcommands ~= format("depend=%s:%s", cast(string)env.dependencySetting, env.dependentJob);
+    }
+    writeln(qsubcommands);
 
     if(env.scriptPath !is null){
         auto app = appender!string;
@@ -785,10 +794,11 @@ PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnviro
         import std.file;
         std.file.write(env.scriptPath, app.data);
 
-        auto qsub = execute(["qsub", env.scriptPath]);
+        qsubcommands ~= env.scriptPath;
+        auto qsub = execute(qsubcommands);
         dstJobId = qsub.output.until!(a => a != '.').array().to!string;
     }else{
-        auto pipes = pipeProcess(["qsub"], Redirect.stdin | Redirect.stdout);
+        auto pipes = pipeProcess(qsubcommands, Redirect.stdin | Redirect.stdout);
         scope(exit) wait(pipes.pid);
         scope(failure) kill(pipes.pid);
 
@@ -808,16 +818,27 @@ PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnviro
 
 template afterRunImpl(DependencySetting ds)
 {
-    PushResult afterRunImpl(TL)(PushResult parentJob, TL taskList, JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
+    PushResult!(ReturnTypeOfTaskList!TL) afterRunImpl(X, TL)(PushResult!X parentJob, TL taskList, JobEnvironment env = defaultJobEnvironment(), string file = __FILE__, size_t line = __LINE__)
     if(isTaskList!TL)
     {
         if(parentJob.isAborted) {
             writeln("%s(%s): This job is aborted because the parent job of this job is aborted.", file, line);
-            return PushResult(Yes.isAborted, "");
+            return typeof(return)(Yes.isAborted, "");
         }
 
         env.dependentJob = parentJob.jobId;
         env.dependencySetting = ds;
+
+        auto cluster = ClusterInfo.currInstance;
+        if(auto kyotobInfo = cast(KyotoBInfo)cluster) {
+            auto newenv = env.dup;
+            newenv.autoSetting();
+            runOnlyMainProcessOnDevHost({
+                env.dependentJob = submitMonitoringJob(parentJob.jobId, newenv.queueName, cluster);
+                env.dependencySetting = DependencySetting.success_single;
+            });
+        }
+
         return run(taskList, env, file, line);
     }
 }
@@ -942,3 +963,85 @@ if(isInputRange!R)
 
     return AppendAsTasksResult(range, taskList);
 }
+
+
+/**
+開発ノードで実行されたときは環境変数をジョブスクリプトに埋め込み，
+計算ノードで実行されたときは環境変数を読み込みます
+*/
+string saveOrLoadENV(ref JobEnvironment env, string key, lazy string value)
+{
+    auto cluster = ClusterInfo.currInstance;
+    if(cluster !is null && cluster.isDevHost) {
+        auto v = value;
+        env.envs[key] = v;
+        return v;
+    } else if(cluster !is null && cluster.isCompNode) {
+        return environment[key];
+    } else {
+        // cluster == nullならローカルPCなので，valueを評価してそのまま返すだけでよい
+        return value;
+    }
+}
+
+
+/**
+qsubを用いてジョブの終了を監視するジョブを投げます．
+この関数は，投入した監視ジョブのジョブID(.jb付き)を返します．
+*/
+string submitMonitoringJob(string jobId, string qname, ClusterInfo cluster)
+{
+    string dstJobId;
+    runOnlyMainProcessOnDevHost({
+        if(jobId.canFind('[')) jobId = jobId.split('[')[0];
+        auto pipes = pipeProcess(["qsub"], Redirect.stdin | Redirect.stdout);
+        scope(exit) wait(pipes.pid);
+        scope(failure) kill(pipes.pid);
+
+        {
+            auto writer = pipes.stdin.lockingTextWriter;
+            .put(writer, "#!/bin/bash\n");
+            if(auto kyotobInfo = cast(KyotoBInfo)cluster) {
+                writer.formattedWrite("#QSUB -q %s\n", qname);
+                .put(writer, "#QSUB -ug gr10061\n");
+                .put(writer, "#QSUB -W 336:00\n");
+                .put(writer, "#QSUB -A p=1:t=1:c=1:m=3413M\n");
+                .put(writer, "\n");
+                .put(writer, "cd $QSUB_WORKDIR\n");
+            } else {
+                writer.formattedWrite("#PBS -q %s\n", qname);
+                .put(writer, "#PBS -l walltime=%336:00:00\n");
+                .put(writer, "#PBS -l nodes=1:ppn=1\n");
+                .put(writer, "\n");
+                .put(writer, "cd $PBS_O_WORKDIR\n");
+            }
+            .put(writer, "set -x\n");
+            writer.formattedWrite(monitoringJobScript, jobId);
+        }
+        pipes.stdin.flush();
+        pipes.stdin.close();
+        wait(pipes.pid);
+        dstJobId = pipes.stdout.byLine.front.chomp.to!string;
+    });
+
+    writefln!"JobID Of Monitor:  %s"(dstJobId);
+
+    return dstJobId;
+}
+
+
+static immutable string monitoringJobScript =
+q{
+target_id="%1$s"
+
+while :
+do
+    ret=$(qstat | grep $target_id)
+    if [ ! "$ret" ]; then
+        echo "Finished"
+        break
+    fi
+
+    sleep 5s
+done
+};

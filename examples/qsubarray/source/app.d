@@ -77,7 +77,7 @@ void main(string[] args)
 void submitToQueue(JobEnvironment env, string[] args, ulong len, SysTime time, ulong runCount)
 {
     env.isEnabledRenameExeFile = false;
-    env.logdir = format("logs_%s_%s", time.toISOString(), runCount);
+    env.logdir = env.saveOrLoadENV("TUTHPCLIB_QSUBARRAY_LOGDIR", format("logs_%s_%s", time.toISOString(), runCount));
 
     foreach(i; iota(len).runAsTasks(env)) {
         auto p = pipe();
