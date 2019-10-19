@@ -38,10 +38,10 @@ enum EnvironmentKey : string
 
 enum ChildProcessType : string
 {
-    SUBMITTER = "SUBMITTER",
-    ANALYZER = "ANALYZER",
-    TASKMANAGER = "TASK_MANAGER",
-    TASKPROCESSOR = "TASK_PROCESSOR",
+    SUBMITTER = "TUTHPC_SUBMITTER",
+    ANALYZER = "TUTHPC_ANALYZER",
+    TASK_MANAGER = "TUTHPC_TASK_MANAGER",
+    TASK_PROCESSOR = "TUTHPC_TASK_PROCESSOR",
 }
 
 
@@ -235,7 +235,7 @@ class JobEnvironment
                 renamedExePath = originalExePath;
             }
 
-            jobScript = [format("%s %-('%s'%| %)", renamedExePath, Runtime.args[1 .. $])];
+            jobScript = [format("%s %-('%s'%| %) %s", renamedExePath, filteredRuntimeArgs(), cast(string)ChildProcessType.TASK_MANAGER)];
 
             if(isEnabledEmailOnError){
                 if(environment.get("MAILGUN_APIKEY")
@@ -457,7 +457,8 @@ struct QueueOverflowProtector
     void analyze(size_t jobSize, size_t runId, string file, size_t line)
     {
         auto cinfo = ClusterInfo.currInstance;
-        enforce(cinfo !is null && cinfo.isDevHost);
+        enforce(thisProcessType() == ChildProcessType.SUBMITTER
+            ||  thisProcessType() == ChildProcessType.ANALYZER);
 
         if(isAnalyzerProcess){
             countOfTotalMyJobs += jobSize;
@@ -511,7 +512,7 @@ Pid spawnTask(in string[] args, JobEnvironment jenv, size_t taskIndex, string lo
     string[string] env = [EnvironmentKey.TASK_ID : taskIndex.to!string];
     foreach(k, v; addEnvs) env[k] = v;
 
-    auto pid = spawnProcess(args, std.stdio.stdin, File(outname, "w"), File(errname, "w"), env);
+    auto pid = spawnProcess(args ~ (cast(string) ChildProcessType.TASK_PROCESSOR), std.stdio.stdin, File(outname, "w"), File(errname, "w"), env);
     return pid;
 }
 
@@ -586,9 +587,13 @@ void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSiz
     import std.process;
     import std.file;
 
+    enforce(thisProcessType() == ChildProcessType.TASK_MANAGER
+        ||  thisProcessType() == ChildProcessType.TASK_PROCESSOR);
+
     if(auto strOfTaskID = environment.get(EnvironmentKey.TASK_ID)){
         immutable size_t taskIndex = strOfTaskID.to!size_t();
 
+        enforce(thisProcessType() == ChildProcessType.TASK_PROCESSOR);
         enforce(environment.get(EnvironmentKey.RUN_ID, "-1").to!long == RunState.countOfCallRun);
 
         import core.thread;
@@ -607,6 +612,7 @@ void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSiz
             var = taskList[taskIndex]();
         }
     }else{
+        enforce(thisProcessType() == ChildProcessType.TASK_MANAGER);
         enforce(exists(logdir));
 
         static struct ProcessState
@@ -646,12 +652,11 @@ void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSiz
 
 
 /**
-実行環境がクラスタ計算機の開発ノードであり，かつ，OverflowProtectionなどで起動されるプロセスでないなら実行する
+ジョブを投入するために起動されたプロセスでのみデリゲートdg()を実行する
 */
-void runOnlyMainProcessOnDevHost(void delegate() dg)
+void runOnlyMainProcess(void delegate() dg)
 {
-    auto cluster = ClusterInfo.currInstance;
-    if(cluster !is null && cluster.isDevHost && !QueueOverflowProtector.isAnalyzerProcess) {
+    if(thisProcessType() == ChildProcessType.SUBMITTER) {
         dg();
     }
 }
@@ -696,17 +701,20 @@ if(isTaskList!TL)
     if(env.isShowMode)
         goto Lreturn;
 
-    if(cluster !is null && cluster.isDevHost)
+    if(thisProcessType() == ChildProcessType.SUBMITTER || thisProcessType() == ChildProcessType.ANALYZER)
     {
         enforce(nowInRunOld == false);
         enforce(env.useArrayJob);
 
-        if(cluster.isDevHost && env.isEnabledQueueOverflowProtection){
+        if(env.isEnabledQueueOverflowProtection)
+        {
             QueueOverflowProtector.analyze(arrayJobSize, RunState.countOfCallRun, file, line);
 
             if(QueueOverflowProtector.isAnalyzerProcess)
                 goto Lreturn;
         }
+
+        enforce(thisProcessType() == ChildProcessType.SUBMITTER);
 
         // ジョブを投げる前に投げてよいかユーザーに確かめる
         if(env.isEnabledUserCheckBeforePush) {
@@ -742,7 +750,8 @@ if(isTaskList!TL)
         writefln("\tLog directory: %s", logdir);
         writeln();
     }
-    else if(cluster !is null && cluster.isCompNode && nowInRunOld == false)
+    else if(cluster !is null && nowInRunOld == false 
+        && (thisProcessType() == ChildProcessType.TASK_MANAGER || thisProcessType() == ChildProcessType.TASK_PROCESSOR) )
     {
         enforce(
                 environment.get(EnvironmentKey.RUN_ID)
@@ -760,7 +769,7 @@ if(isTaskList!TL)
                 for(size_t taskIndex = index + p; taskIndex < taskList.length; taskIndex += env.maxArraySize * env.taskGroupSize)
                     taskIndexList ~= taskIndex;
 
-            processTasks(Runtime.args, env, env.taskGroupSize, RunState.countOfCallRun, taskIndexList, taskList, logdir, file, line);
+            processTasks(Runtime.args[0] ~ filteredRuntimeArgs(), env, env.taskGroupSize, RunState.countOfCallRun, taskIndexList, taskList, logdir, file, line);
         }
     }
     else if(nowInRunOld == true)
@@ -798,7 +807,7 @@ if(isTaskList!TL)
 
         uint parallelSize = std.parallelism.totalCPUs / env.ppn;
         env.envs[EnvironmentKey.RUN_ID] = RunState.countOfCallRun.to!string;
-        processTasks(env.renamedExePath ~ Runtime.args[1 .. $], env, parallelSize, RunState.countOfCallRun, iota(taskList.length), taskList, logdir, file, line, env.envs);
+        processTasks(env.renamedExePath ~ filteredRuntimeArgs(), env, parallelSize, RunState.countOfCallRun, iota(taskList.length), taskList, logdir, file, line, env.envs);
     }
 
   Lreturn:
@@ -874,7 +883,7 @@ template afterRunImpl(DependencySetting ds)
         auto cluster = ClusterInfo.currInstance;
         if(auto kyotobInfo = cast(KyotoBInfo)cluster) {
             newenv.autoSetting();
-            runOnlyMainProcessOnDevHost({
+            runOnlyMainProcess({
                 newenv.dependentJob = submitMonitoringJob(parentJob.jobId, newenv.queueName, cluster);
                 newenv.dependencySetting = DependencySetting.success_single;
             });
@@ -1012,15 +1021,18 @@ if(isInputRange!R)
 */
 string saveOrLoadENV(ref JobEnvironment env, string key, lazy string value)
 {
-    auto cluster = ClusterInfo.currInstance;
-    if(cluster !is null && cluster.isDevHost) {
+    if(thisProcessType() == ChildProcessType.SUBMITTER
+    || thisProcessType() == ChildProcessType.ANALYZER)
+    {
         auto v = value;
         env.envs[key] = v;
         return v;
-    } else if(cluster !is null && cluster.isCompNode) {
+    }
+    else if(thisProcessType() == ChildProcessType.TASK_MANAGER
+         || thisProcessType() == ChildProcessType.TASK_PROCESSOR)
+    {
         return environment[key];
     } else {
-        // cluster == nullならローカルPCなので，valueを評価してそのまま返すだけでよい
         return value;
     }
 }
@@ -1033,7 +1045,7 @@ qsubを用いてジョブの終了を監視するジョブを投げます．
 string submitMonitoringJob(string jobId, string qname, ClusterInfo cluster)
 {
     string dstJobId;
-    runOnlyMainProcessOnDevHost({
+    runOnlyMainProcess({
         if(jobId.canFind('[')) jobId = jobId.split('[')[0];
         auto pipes = pipeProcess(["qsub"], Redirect.stdin | Redirect.stdout);
         scope(exit) wait(pipes.pid);

@@ -20,8 +20,8 @@ interface ClusterInfo
     uint arrayID();
     string arrayIDEnvKey();
 
-    bool isDevHost();
-    bool isCompNode();
+    deprecated bool isDevHost();
+    deprecated bool isCompNode();
 
     static
     ClusterInfo currInstance()
@@ -114,14 +114,30 @@ class KyotoBInfo : ClusterInfo
 
     bool isDevHost()
     {
+        import tuthpc.taskqueue;
         import std.socket;
-        return Socket.hostName.startsWith("laurel");
+
+        bool ret1 = Socket.hostName.startsWith("laurel");
+        bool ret2 = thisProcessType() == ChildProcessType.ANALYZER
+                 || thisProcessType() == ChildProcessType.SUBMITTER;
+
+
+        enforce(ret1 == ret2);
+
+        return ret1;
     }
 
     bool isCompNode()
     {
+        import tuthpc.taskqueue;
         import std.socket;
-        return Socket.hostName.startsWith("nb-");
+        bool ret1 = Socket.hostName.startsWith("nb-");
+        bool ret2 = thisProcessType() == ChildProcessType.TASK_MANAGER
+                 || thisProcessType() == ChildProcessType.TASK_PROCESSOR;
+
+        enforce(ret1 == ret2);
+
+        return ret1;
     }
   }
 
