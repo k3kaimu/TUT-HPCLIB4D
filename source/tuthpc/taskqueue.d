@@ -36,6 +36,47 @@ enum EnvironmentKey : string
 }
 
 
+enum ChildProcessType : string
+{
+    SUBMITTER = "SUBMITTER",
+    ANALYZER = "ANALYZER",
+    TASKMANAGER = "TASK_MANAGER",
+    TASKPROCESSOR = "TASK_PROCESSOR",
+}
+
+
+ChildProcessType thisProcessType()
+{
+    auto args = Runtime.args;
+
+    foreach(type; EnumMembers!ChildProcessType) {
+        if(args.canFind(cast(string)type))
+            return type;
+    }
+
+    return ChildProcessType.SUBMITTER;
+}
+
+
+string[] filteredRuntimeArgs()
+{
+    static string[] dst;
+
+    if(dst is null) {
+        LnextArg:
+        foreach(e; Runtime.args[1 .. $]) {
+            foreach(type; EnumMembers!ChildProcessType)
+                if(e == cast(string)type)
+                    continue LnextArg;
+
+            dst ~= e;
+        }
+    }
+
+    return dst;
+}
+
+
 string hashOfExe()
 {
     import std.file;
@@ -408,7 +449,7 @@ struct QueueOverflowProtector
     static
     bool isAnalyzerProcess()
     {
-        return environment.get("TUTHPC_ANALYZE_ALL_JOB") !is null;
+        return thisProcessType() == ChildProcessType.ANALYZER;
     }
 
 
@@ -425,10 +466,10 @@ struct QueueOverflowProtector
                 "Your jobs may cause queue overflow. Please use env.maxArraySize.");
         }else{
             if(!alreadySpawnAnalyzer){
-                string cmd = format("%s %-('%s'%| %)", Runtime.args[0], Runtime.args[1 .. $]);
+                string cmd = format("%s %-('%s'%| %) %s", Runtime.args[0], filteredRuntimeArgs(), ChildProcessType.ANALYZER);
                 writefln("The job analyzer is spawned with \"%s\".", cmd);
 
-                auto analyzer = executeShell(cmd, ["TUTHPC_ANALYZE_ALL_JOB" : "TRUE"]);
+                auto analyzer = executeShell(cmd);
                 enforce(analyzer.status == 0, "Job analyer is failed. Output of the analyzer is following:\n" ~ analyzer.output);
                 writeln(analyzer.output);
                 alreadySpawnAnalyzer = true;
@@ -784,7 +825,6 @@ PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnviro
         qsubcommands ~= "-W";
         qsubcommands ~= format("depend=%s:%s", cast(string)env.dependencySetting, env.dependentJob);
     }
-    writeln(qsubcommands);
 
     if(env.scriptPath !is null){
         auto app = appender!string;
