@@ -402,7 +402,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     }
 
     if(EnvironmentKey.QSUB_ARGS in environment) {
-        orange,formattedWrite("#%s %s\n", headerID, environment[EnvironmentKey.QSUB_ARGS]);
+        orange.formattedWrite("#%s %s\n", headerID, environment[EnvironmentKey.QSUB_ARGS]);
     }
 
     .put(orange, "set -e\n");
