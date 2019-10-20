@@ -326,7 +326,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     .put(orange, "#!/bin/bash\n");
 
     // resource(nodes, ppn,)
-    if(auto cinfo = cast(TUTXInfo)cluster) {
+    if(auto cinfo = cast(TUTWInfo)cluster) {
         orange.formattedWrite("#PBS -l nodes=%s:ppn=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
         if(jenv.mem != -1) orange.formattedWrite(",mem=%sgb", jenv.mem);
         if(jenv.pmem != -1) orange.formattedWrite(",pmem=%sgb", jenv.pmem);
