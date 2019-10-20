@@ -101,10 +101,10 @@ class TUTXInfo : ClusterInfo
 
     uint arrayID()
     {
-        return environment["PBS_ARRAYID"].to!uint;
+        return environment["PBS_ARRAY_INDEX"].to!uint;
     }
 
-    string arrayIDEnvKey() { return "PBS_ARRAYID"; }
+    string arrayIDEnvKey() { return "PBS_ARRAY_INDEX"; }
 
     bool isDevHost()
     {

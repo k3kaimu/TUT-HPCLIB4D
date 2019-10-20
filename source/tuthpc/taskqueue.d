@@ -326,7 +326,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     .put(orange, "#!/bin/bash\n");
 
     // resource(nodes, ppn,)
-    if(headerID == "PBS") {
+    if(auto cinfo = cast(TUTXInfo)cluster) {
         orange.formattedWrite("#PBS -l nodes=%s:ppn=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
         if(jenv.mem != -1) orange.formattedWrite(",mem=%sgb", jenv.mem);
         if(jenv.pmem != -1) orange.formattedWrite(",pmem=%sgb", jenv.pmem);
@@ -341,7 +341,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
 
         if(jenv.pmem != -1) orange.formattedWrite(":m=%sG", jenv.pmem);
     } else {
-        enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
+        orange.formattedWrite("#PBS -l select=%s:ncpus=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
     }
 
     .put(orange, '\n');
@@ -399,6 +399,10 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         if(jenv.isEnabledEmailOnError)  .put(orange, 'a');
         .put(orange, '\n');
         orange.formattedWrite("#%s -M %-(%s %)\n", headerID, jenv.emailAddrs);
+    }
+
+    if(EnvironmentKey.QSUB_ARGS in environment) {
+        orange,formattedWrite("#%s %s\n", headerID, environment[EnvironmentKey.QSUB_ARGS]);
     }
 
     .put(orange, "set -e\n");
