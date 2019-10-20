@@ -847,9 +847,9 @@ PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnviro
         qsubcommands ~= format("depend=%s:%s", cast(string)env.dependencySetting, env.dependentJob);
     }
 
-    if(EnvironmentKey.QSUB_ARGS in environment) {
-        qsubcommands ~= environment[EnvironmentKey.QSUB_ARGS];
-    }
+    // if(EnvironmentKey.QSUB_ARGS in environment) {
+    //     qsubcommands ~= environment[EnvironmentKey.QSUB_ARGS];
+    // }
 
     if(env.scriptPath !is null){
         auto app = appender!string;
