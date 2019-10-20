@@ -33,6 +33,7 @@ enum EnvironmentKey : string
     TASK_ID = "TUTHPC_JOB_ENV_TASK_ID",
     PBS_JOBID = "PBS_JOBID",
     EMAIL_ADDR = "TUTHPC_EMAIL_ADDR",
+    QSUB_ARGS = "TUTHPC_QSUB_ARGS",
 }
 
 
@@ -833,6 +834,10 @@ PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnviro
     if(env.dependentJob.length != 0) {
         qsubcommands ~= "-W";
         qsubcommands ~= format("depend=%s:%s", cast(string)env.dependencySetting, env.dependentJob);
+    }
+
+    if(EnvironmentKey.QSUB_ARGS in environment) {
+        qsubcommands ~= environment[EnvironmentKey.QSUB_ARGS];
     }
 
     if(env.scriptPath !is null){
