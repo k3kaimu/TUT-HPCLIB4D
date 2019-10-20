@@ -48,10 +48,10 @@ enum ChildProcessType : string
 
 ChildProcessType thisProcessType()
 {
-    auto args = Runtime.args;
+    auto arg = Runtime.args.join(" ");
 
     foreach(type; EnumMembers!ChildProcessType) {
-        if(args.canFind(cast(string)type))
+        if(arg.canFind(cast(string)type))
             return type;
     }
 
@@ -468,7 +468,7 @@ struct QueueOverflowProtector
                 "Your jobs may cause queue overflow. Please use env.maxArraySize.");
         }else{
             if(!alreadySpawnAnalyzer){
-                string cmd = format("%s %-('%s'%| %) %s", Runtime.args[0], filteredRuntimeArgs(), ChildProcessType.ANALYZER);
+                string cmd = format("%s %-('%s'%| %) %s", Runtime.args[0], filteredRuntimeArgs(), cast(string)ChildProcessType.ANALYZER);
                 writefln("The job analyzer is spawned with \"%s\".", cmd);
 
                 auto analyzer = executeShell(cmd);
