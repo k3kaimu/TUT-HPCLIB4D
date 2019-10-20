@@ -33,12 +33,14 @@ interface ClusterInfo
 
         if(envval.startsWith("TUTW"))
             return new TUTWInfo();
+        else if(envval.startsWith("TUTX"))
+            return new TUTXInfo();
         else if(envval.startsWith("KyotoB"))
             return new KyotoBInfo();
         else if(envval.startsWith("LocalPC"))
             return null;
         else
-            enforce(0, "The value of '%s' must be 'LocalPC' or 'TUTW' or 'KyotoB'.");
+            enforce(0, "The value of '%s' must be 'LocalPC', 'TUTW', 'TUTX', or 'KyotoB'.");
 
         return null;
     }
@@ -77,6 +79,43 @@ class TUTWInfo : ClusterInfo
     {
         import std.socket;
         return Socket.hostName.startsWith("wsnd");
+    }
+  }
+}
+
+
+class TUTXInfo : ClusterInfo
+{
+  override @property
+  {
+    string name() { return "TUTX"; }
+    uint maxNode() { return 14; }
+    uint maxPPN() { return 28; }
+    uint maxMemGB() { return 192; }
+    string defaultQueueName() { return "wLrchq"; }
+
+    string jobID()
+    {
+        return environment["PBS_JOBID"];
+    }
+
+    uint arrayID()
+    {
+        return environment["PBS_ARRAYID"].to!uint;
+    }
+
+    string arrayIDEnvKey() { return "PBS_ARRAYID"; }
+
+    bool isDevHost()
+    {
+        import std.socket;
+        return Socket.hostName.startsWith("xdev");
+    }
+
+    bool isCompNode()
+    {
+        import std.socket;
+        return Socket.hostName.startsWith("xsnd");
     }
   }
 }
