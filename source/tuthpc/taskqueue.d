@@ -367,21 +367,28 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
 
     // array job
     if(jenv.useArrayJob) {
-        if(headerID == "PBS") {
-            orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
+        if(auto cinfo = cast(TUTWInfo)cluster) {
+            if(jobCount > 1) {
+                orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
 
-            if(jenv.maxSlotSize != 0) {
-                orange.put('%');
-                orange.formattedWrite("%s", jenv.maxSlotSize);
+                if(jenv.maxSlotSize != 0) {
+                    orange.put('%');
+                    orange.formattedWrite("%s", jenv.maxSlotSize);
+                }
             }
-        } else if(headerID == "QSUB") {
+        } else if(auto cinfo = cast(KyotoBInfo)cluster) {
             if(jobCount > 1) {
                 orange.formattedWrite("#QSUB -J %s-%s\n", 0, jobCount-1);
                 if(jenv.maxSlotSize != 0)
                     writeln("In this cluster, maxSlotSize is ignored.");
             }
-        } else {
-            enforce(0, "headerID == '%s' and it is unknown value.".format(headerID));
+        }
+        else {
+            if(jobCount > 1) {
+                orange.formattedWrite("#PBS -J %s-%s\n", 0, jobCount-1);
+                if(jenv.maxSlotSize != 0)
+                    writeln("In this cluster, maxSlotSize is ignored.");
+            }
         }
     }
 
@@ -398,7 +405,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
 
-    if(jenv.useArrayJob && headerID == "QSUB" && jobCount == 1) {
+    if(jenv.useArrayJob && jobCount == 1) {
         orange.formattedWrite("export %s=0\n", cluster.arrayIDEnvKey);
     }
 
