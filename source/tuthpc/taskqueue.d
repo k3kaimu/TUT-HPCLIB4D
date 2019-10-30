@@ -406,6 +406,12 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     }
 
     .put(orange, "set -e\n");
+
+    foreach(k, v; environment.toAA) {
+        if(!k.endsWith("()"))
+            orange.formattedWrite("export %s='%s'\n", k, v);
+    }
+
     .put(orange, "source ~/.bashrc\n");
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
 
