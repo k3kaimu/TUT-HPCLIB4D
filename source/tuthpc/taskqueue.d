@@ -34,6 +34,7 @@ enum EnvironmentKey : string
     PBS_JOBID = "PBS_JOBID",
     EMAIL_ADDR = "TUTHPC_EMAIL_ADDR",
     QSUB_ARGS = "TUTHPC_QSUB_ARGS",
+    EXPORT_ENVS = "TUTHPC_EXPORT_ENVS",
 }
 
 
@@ -406,11 +407,13 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         orange.formattedWrite("#%s %s\n", headerID, environment[EnvironmentKey.QSUB_ARGS]);
     }
 
-    .put(orange, "set -e\n");
+    //.put(orange, "set -e\n");
 
-    foreach(k, v; environment.toAA) {
-        if(!k.endsWith("()"))
-            orange.formattedWrite("export %s='%s'\n", k, v);
+    if(EnvironmentKey.EXPORT_ENVS in environment) {
+        foreach(k; environment[EnvironmentKey.EXPORT_ENVS].split(",")) {
+            if(auto v = environment.get(k, null))
+                orange.formattedWrite("export %s='%s'\n", k, v);
+        }
     }
 
     .put(orange, "source ~/.bashrc\n");
