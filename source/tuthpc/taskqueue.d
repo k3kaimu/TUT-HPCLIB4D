@@ -539,7 +539,7 @@ Pid spawnTask(in string[] args, JobEnvironment jenv, size_t taskIndex, string lo
 }
 
 
-void copyLogTextToStdOE(int status, JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
+void copyLogTextToStdOE(int status, Duration time, JobEnvironment jenv, size_t taskIndex, string logdir, string file, size_t line)
 {
     import std.path;
     import std.stdio;
@@ -552,7 +552,7 @@ void copyLogTextToStdOE(int status, JobEnvironment jenv, size_t taskIndex, strin
         auto writer = stdout.lockingTextWriter;
         writer.formattedWrite("=========== START OF %sTH TASK. ===========\n", taskIndex);
         std.stdio.write(readText(outname));
-        writer.formattedWrite("=========== END OF %sTH TASK. (status = %s) ===========\n", taskIndex, status);
+        writer.formattedWrite("=========== END OF %sTH TASK. (status = %s, time = %s [s]) ===========\n", taskIndex, status, time.total!"seconds");
     }
 
     {
@@ -641,6 +641,7 @@ void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSiz
         {
             Pid pid;
             size_t taskIndex;
+            SysTime startTime;
         }
 
         ProcessState*[] procList = new ProcessState*[](parallelSize);
@@ -654,13 +655,17 @@ void processTasks(R, TL)(in string[] args, JobEnvironment jenv, uint parallelSiz
                 if(proc is null && !taskIndxs.empty) {
                     immutable size_t taskIndex = taskIndxs.front;
                     taskIndxs.popFront();
-                    proc = new ProcessState(spawnTask(args, jenv, taskIndex, logdir, file, line, addEnvs), taskIndex);
+                    proc = new ProcessState(
+                        spawnTask(args, jenv, taskIndex, logdir, file, line, addEnvs),
+                        taskIndex,
+                        Clock.currTime);
                 }
 
                 if(proc !is null) {
                     auto status = tryWait(proc.pid);
                     if(status.terminated) {
-                        copyLogTextToStdOE(status.status, jenv, proc.taskIndex, logdir, file, line);
+                        auto procTime = Clock.currTime() - proc.startTime;  // 処理にかかった時間を計算
+                        copyLogTextToStdOE(status.status, procTime, jenv, proc.taskIndex, logdir, file, line);
                         proc = null;
                     }
                 }
