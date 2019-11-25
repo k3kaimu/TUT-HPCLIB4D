@@ -35,6 +35,7 @@ enum EnvironmentKey : string
     EMAIL_ADDR = "TUTHPC_EMAIL_ADDR",
     QSUB_ARGS = "TUTHPC_QSUB_ARGS",
     EXPORT_ENVS = "TUTHPC_EXPORT_ENVS",
+    DEFAULT_ARGS = "TUTHPC_DEFAULT_ARGS",
 }
 
 
@@ -183,8 +184,10 @@ class JobEnvironment
     {
         auto cluster = ClusterInfo.currInstance;
 
-        if(isForcedCommandLineArgs)
+        if(isForcedCommandLineArgs) {
+            if(EnvironmentKey.DEFAULT_ARGS in environment) this.applyCommandLineArgs(Runtime.args[0] ~ environment[EnvironmentKey.DEFAULT_ARGS].split(","));
             this.applyCommandLineArgs(Runtime.args);
+        }
 
         if(cluster !is null && queueName is null) queueName = cluster.defaultQueueName;
         if(ppn == 0) ppn = 1;
@@ -325,6 +328,7 @@ class JobEnvironment
 JobEnvironment defaultJobEnvironment(string[] args = Runtime.args)
 {
     JobEnvironment env = new JobEnvironment();
+    if(EnvironmentKey.DEFAULT_ARGS in environment) env.applyCommandLineArgs(args[0] ~ environment[EnvironmentKey.DEFAULT_ARGS].split(","));
     env.applyCommandLineArgs(args);
     return env;
 }
