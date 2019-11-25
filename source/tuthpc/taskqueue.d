@@ -155,6 +155,8 @@ class JobEnvironment
             "th:after|th:a", &dependentJob,
             "th:ppn|th:p", &ppn,
             "th:nodes|th:n", &nodes,
+            "th:mem", &mem,
+            "th:pmem|th:pm", &pmem,
             "th:taskGroupSize|th:g", &taskGroupSize,
             "th:walltime|th:w", &walltime_int,
             "th:mailOnError|th:me", &isEnabledEmailOnError,
@@ -168,6 +170,7 @@ class JobEnvironment
             "th:maxProcessNum|th:plim", &totalProcessNum,
             "th:forceCommandLineArgs", &isForcedCommandLineArgs,
             "th:logdir", &logdir,
+            "th:scriptLog", &scriptPath,
             "th:show", &isShowMode
         );
 
@@ -206,6 +209,15 @@ class JobEnvironment
             if(vmem == 0) vmem = maxMem;
             if(pvmem == 0) pvmem = maxMemPerPS;
         }
+
+        if(mem <= 0 && pmem > 0) {
+            mem = pmem * ppn * taskGroupSize;
+        } else if(mem > 0 && pmem <= 0) {
+            pmem = mem / (ppn * taskGroupSize);
+        }
+
+        if(vmem <= 0 && mem > 0) vmem = mem;
+        if(pvmem <= 0 && pmem > 0) pvmem = pmem;
 
         if(walltime == 0.seconds){
             switch(queueName){
