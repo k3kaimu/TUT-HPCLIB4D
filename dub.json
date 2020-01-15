@@ -7,6 +7,6 @@
     "copyright": "Copyright © 2016, Kazuki Komatsu",
     "license": "NYSL",
     "dependencies": {
-        "msgpack-d": "~>1.0.1"
+        "msgpack-d": "~>1.0.2"
     }
 }
