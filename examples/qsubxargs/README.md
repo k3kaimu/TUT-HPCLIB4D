@@ -20,7 +20,15 @@ For example:
 
 ## インストール方法
 
-以下の環境変数をbashrcなどに書く
+PATHの通った適当なディレクトリに，ビルド済みバイナリをダウンロードして入れておく．
+
+```sh
+$ cd ~/local/bin
+$ wget https://github.com/k3kaimu/cluster-tools/releases/latest/download/qsubxargs
+$ chmod +x qsubxargs
+```
+
+以下の環境変数をbashrcなどに書く．
 
 ```
 export TUTHPC_CLUSTER_NAME="TUTX"
