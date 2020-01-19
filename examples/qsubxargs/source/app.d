@@ -19,6 +19,11 @@ bool flagDryRun = false;        // ジョブを投入せずに，コマンドの
 bool flagVerbose = false;       // 冗長な出力を含む
 
 
+string[] args_tuthpclib_options;
+string[] args_xargs_options;
+string[] args_commands;
+
+
 void main(string[] args)
 {
     auto env = defaultJobEnvironment;
@@ -26,28 +31,17 @@ void main(string[] args)
     env.isEnabledQueueOverflowProtection = false;   // ユーザーに全てを委ねる
     env.isEnabledUserCheckBeforePush = false;       // ユーザーに全てを委ねる
 
-     getopt(args,
-        std.getopt.config.passThrough,
-        "th:dryrun", &flagDryRun,
-        "th:verbose", &flagVerbose);
-
     if(args.length == 1) {
         printUsage();
         return;
     }
 
-    // プログラム名を無視
-    args = args[1 .. $];
+    parseArgs(args);
 
-    // "--th:"が頭についている引数は無視する
-    while(args.length && args[0].startsWith("--th:"))
-        args = args[1 .. $];
-
-    if(args.length == 0) {
+    if(args_commands.length == 0) {
         printUsage();
         return;
     }
-
 
     // ログ出力用のディレクトリ名
     if(env.jobName) {
@@ -64,7 +58,7 @@ void main(string[] args)
     // logdir/scripts 以下にシェルスクリプトを保存する
     if(thisProcessType() == ChildProcessType.SUBMITTER) {
         // コマンドのリストを作成
-        string[] commands = makeCommandLines(args);
+        string[] commands = makeCommandLines();
         if(flagDryRun) {
             writefln("%-(%s\n%)", commands);
             return;
@@ -95,23 +89,47 @@ void main(string[] args)
 
     // ジョブの投入 or 実行
     taskList.run(env);
-
-    // foreach(i; 0 .. taskList.length) taskList[i]();
 }
 
 
-string[] makeCommandLines(const(string)[] xargsOptions)
+void parseArgs(string[] args)
 {
-    string[] program = ["xargs"];
+    string[] dummy_args = args.dup;
+    getopt(dummy_args,
+        std.getopt.config.passThrough,
+        "th:dryrun", &flagDryRun,
+        "th:verbose", &flagVerbose);
 
-    // "-"が頭についている引数を追加する
-    while(xargsOptions.length && xargsOptions[0].startsWith("-")) {
-        program ~= xargsOptions[0];
-        xargsOptions = xargsOptions[1 .. $];
+    // プログラム名を無視
+    args = args[1 .. $];
+
+    // "--th:" が頭についている引数
+    while(args.length && args[0].startsWith("--th:")) {
+        args_tuthpclib_options ~= args[0];
+        args = args[1 .. $];
     }
 
-    program ~= "echo";
-    program ~= xargsOptions;    // 残りの引数を追加する
+    // -- が出現するまでは xargs のオプション
+    while(args.length && args[0] != "--") {
+        args_xargs_options ~= args[0];
+        args = args[1 .. $];
+    }
+
+    // -- がそもそも引数になかった場合
+    if(args.length == 0)
+        return;
+
+    // -- を消す
+    args = args[1 .. $];
+
+    // 残りはコマンド
+    args_commands ~= args;
+}
+
+
+string[] makeCommandLines()
+{
+    string[] program = ["xargs"] ~ args_xargs_options ~ ["echo"] ~ args_commands;
 
     auto stdoutPipe = pipe();
     auto xargsPid = spawnProcess(program, stdin, stdoutPipe.writeEnd, stderr);
@@ -151,7 +169,7 @@ void printUsage()
 
 immutable string strUsage = `
 Usage:
-    qsubxargs <tuthpc-lib options...> <xargs options...> <commands...>
+    qsubxargs <tuthpc-lib options...> <xargs options...> -- <commands...>
 
 Where:
     <tuthpc-lib options...>:    options for qsubxargs

@@ -6,7 +6,7 @@
 
 ```
 Usage:
-    qsubxargs <tuthpc-lib options...> <xargs options...> <commands...>
+    qsubxargs <tuthpc-lib options...> <xargs options...> -- <commands...>
 
 Where:
     <tuthpc-lib options...>:    options for qsubxargs
@@ -14,7 +14,7 @@ Where:
     <commands...>:              commands
 
 For example:
-    ls -1 | qsubxargs --th:g=28 --th:m=100 -l echo
+    $ ls -1 | qsubxargs --th:g=28 --th:m=100 -l -- echo
 ```
 
 
@@ -61,7 +61,7 @@ export TUTHPC_STARTUP_SCRIPT='source ~/.bashrc'
 たとえば生成されたコマンドが4000個のとき，各ジョブは40個のコマンドを20並行で処理する．
 
 ```sh
-qsubxargs --th:g=20 --th:m=100 <xargs options...> <commands...>
+qsubxargs --th:g=20 --th:m=100 <xargs options...> -- <commands...>
 ```
 
 
