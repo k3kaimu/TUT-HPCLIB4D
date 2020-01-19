@@ -17,6 +17,7 @@ import tuthpc.taskqueue;
 
 bool flagDryRun = false;        // ジョブを投入せずに，コマンドのリストを出力する
 bool flagVerbose = false;       // 冗長な出力を含む
+bool flagHelp = false;
 
 
 string[] args_tuthpclib_options;
@@ -31,14 +32,9 @@ void main(string[] args)
     env.isEnabledQueueOverflowProtection = false;   // ユーザーに全てを委ねる
     env.isEnabledUserCheckBeforePush = false;       // ユーザーに全てを委ねる
 
-    if(args.length == 1) {
-        printUsage();
-        return;
-    }
-
     parseArgs(args);
 
-    if(args_commands.length == 0) {
+    if(flagHelp) {
         printUsage();
         return;
     }
@@ -98,7 +94,8 @@ void parseArgs(string[] args)
     getopt(dummy_args,
         std.getopt.config.passThrough,
         "th:dryrun", &flagDryRun,
-        "th:verbose", &flagVerbose);
+        "th:verbose", &flagVerbose,
+        "help|h", &flagHelp);
 
     // プログラム名を無視
     args = args[1 .. $];
