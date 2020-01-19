@@ -1,0 +1,12 @@
+{
+    "name": "qsubxargs",
+    "authors": [
+        "Kazuki Komatsu"
+    ],
+    "description": "A minimal D application.",
+    "copyright": "Copyright © 2020, Kazuki Komatsu",
+    "license": "NYSL",
+    "dependencies": {
+        "tuthpc": { "path": "../.." }
+    }
+}
