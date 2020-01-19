@@ -14,9 +14,9 @@ jobs:
         with:
           compiler: ldc-1.18.0
       - name: Build qsubarray
-        run: cd examples/qsubarray && dub build --single qsubarray.d && cd ../..
+        run: cd examples/qsubarray && dub build && cd ../..
       - name: Build qsubxargs
-        run: cd examples/qsubxargs && dub build --single qsubxargs.d && cd ../..
+        run: cd examples/qsubxargs && dub build && cd ../..
       - name: Upload the artifacts
         uses: skx/github-action-publish-binaries@master
         env:
