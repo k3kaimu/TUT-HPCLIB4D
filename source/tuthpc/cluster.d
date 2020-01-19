@@ -26,7 +26,9 @@ interface ClusterInfo
     static
     ClusterInfo currInstance()
     {
-        immutable string envkey = "TUTHPC_CLUSTER_NAME";
+        import tuthpc.taskqueue : EnvironmentKey;
+
+        immutable string envkey = EnvironmentKey.CLUSTER_NAME;
         enforce(envkey in environment , "cannot find environment variable '%s'".format(envkey));
 
         immutable string envval = environment[envkey];

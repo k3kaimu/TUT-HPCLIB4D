@@ -32,10 +32,12 @@ enum EnvironmentKey : string
     ARRAY_ID = "TUTHPC_JOB_ENV_ARRAY_ID",
     TASK_ID = "TUTHPC_JOB_ENV_TASK_ID",
     PBS_JOBID = "PBS_JOBID",
+    CLUSTER_NAME = "TUTHPC_CLUSTER_NAME",
     EMAIL_ADDR = "TUTHPC_EMAIL_ADDR",
     QSUB_ARGS = "TUTHPC_QSUB_ARGS",
     EXPORT_ENVS = "TUTHPC_EXPORT_ENVS",
     DEFAULT_ARGS = "TUTHPC_DEFAULT_ARGS",
+    STARTUP_SCRIPT = "TUTHPC_STARTUP_SCRIPT",
 }
 
 
@@ -430,6 +432,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
 
     //.put(orange, "set -e\n");
 
+    // 引き継ぐ環境変数の設定
     if(EnvironmentKey.EXPORT_ENVS in environment) {
         foreach(k; environment[EnvironmentKey.EXPORT_ENVS].split(",")) {
             if(auto v = environment.get(k, null))
@@ -437,7 +440,19 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         }
     }
 
-    .put(orange, "source ~/.bashrc\n");
+    // EnvironmentKeyにあるもののうち，現在設定されているものを引き継ぐ
+    foreach(k; EnumMembers!EnvironmentKey) {
+        if(auto v = environment.get(k, null))
+            orange.formattedWrite("export %s='%s'\n", cast(string)k, v);
+    }
+
+    // 起動時に走らせるスクリプト
+    if(EnvironmentKey.STARTUP_SCRIPT in environment) {
+        orange.formattedWrite("%s\n", environment[EnvironmentKey.EXPORT_ENVS]);
+    } else {
+        orange.formattedWrite("%s\n", "if [ -f ~/.bashrc ] ; then source ~/.bashrc; fi");
+    }
+
     .put(orange, "MPI_PROCS=`wc -l $PBS_NODEFILE | awk '{print $1}'`\n");
 
     if(jenv.useArrayJob && jobCount == 1) {

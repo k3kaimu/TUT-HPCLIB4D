@@ -27,6 +27,7 @@ export TUTHPC_CLUSTER_NAME="TUTX"
 export TUTHPC_QSUB_ARGS='-v SINGULARITY_IMAGE=<Image name>'
 export TUTHPC_EXPORT_ENVS='USER'
 export TUTHPC_DEFAULT_ARGS='--th:m=100'
+export TUTHPC_STARTUP_SCRIPT='source ~/.bashrc'
 ```
 
 + `TUTHPC_EXPORT_ENVS`
@@ -39,6 +40,11 @@ export TUTHPC_DEFAULT_ARGS='--th:m=100'
 たとえば，`--th:g=28,--th:m=4`を設定しておけば，`qsubxargs`の実行時に毎回 `--th:g=28 --th:m=4` を書かなくても良くなります．
 
 
++ `TUTHPC_STARTUP_SCRIPT`
+
+各ジョブが計算ノードで実行されるときに，事前に実行されるシェルスクリプト．
+環境変数などの設定などの用途に使用することを想定しています．
+
 ## Tips
 
 + 20CPUコアを利用するジョブを最大100個投入する
@@ -49,6 +55,11 @@ export TUTHPC_DEFAULT_ARGS='--th:m=100'
 ```sh
 qsubxargs --th:g=20 --th:m=100 <xargs options...> <commands...>
 ```
+
+
++ `--th:dryrun`
+
+このオプションを指定した場合，ジョブの投入は行わずに実際に実行されるコマンドのリストを出力して終了します．
 
 
 ## ビルド方法
