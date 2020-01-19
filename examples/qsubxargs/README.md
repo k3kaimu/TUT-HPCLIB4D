@@ -24,7 +24,7 @@ PATHの通った適当なディレクトリに，ビルド済みバイナリを�
 
 ```sh
 $ cd ~/local/bin
-$ wget https://github.com/k3kaimu/cluster-tools/releases/latest/download/qsubxargs
+$ wget https://github.com/k3kaimu/TUT-HPCLIB4D/releases/latest/download/qsubxargs
 $ chmod +x qsubxargs
 ```
 
