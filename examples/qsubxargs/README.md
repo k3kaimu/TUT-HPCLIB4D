@@ -24,7 +24,6 @@ For example:
 
 ```
 export TUTHPC_CLUSTER_NAME="TUTX"
-export TUTHPC_EMAIL_ADDR="<Your email address>"
 export TUTHPC_QSUB_ARGS='-v SINGULARITY_IMAGE=<Image name>'
 export TUTHPC_EXPORT_ENVS='USER'
 export TUTHPC_DEFAULT_ARGS='--th:m=100'

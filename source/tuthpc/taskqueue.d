@@ -238,8 +238,7 @@ class JobEnvironment
         }
 
         if(isEnabledEmailOnStart || isEnabledEmailOnEnd || isEnabledEmailOnError) {
-            if(emailAddrs.length == 0) {
-                enforce(EnvironmentKey.EMAIL_ADDR in environment);
+            if(emailAddrs.length == 0 && EnvironmentKey.EMAIL_ADDR in environment) {
                 emailAddrs = [environment[EnvironmentKey.EMAIL_ADDR]];
             }
         }
@@ -256,7 +255,7 @@ class JobEnvironment
 
             jobScript = [format("%s %-('%s'%| %) %s", renamedExePath, filteredRuntimeArgs(), cast(string)ChildProcessType.TASK_MANAGER)];
 
-            if(isEnabledEmailOnError){
+            if(isEnabledEmailOnError && emailAddrs.length != 0){
                 if(environment.get("MAILGUN_APIKEY")
                 && environment.get("MAILGUN_DOMAIN"))
                 {
@@ -416,7 +415,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         }
     }
 
-    if(jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) {
+    if((jenv.isEnabledEmailOnStart || jenv.isEnabledEmailOnEnd || jenv.isEnabledEmailOnError) && jenv.emailAddrs.length != 0) {
         orange.formattedWrite("#%s -m ", headerID);
         if(jenv.isEnabledEmailOnStart)  .put(orange, 'b');
         if(jenv.isEnabledEmailOnEnd)    .put(orange, 'e');
@@ -595,7 +594,7 @@ void copyLogTextToStdOE(int status, Duration time, JobEnvironment jenv, size_t t
         }
     }
 
-    if(status != 0 && jenv.isEnabledEmailOnError){
+    if(status != 0 && jenv.isEnabledEmailOnError && jenv.emailAddrs.length != 0){
         import std.socket;
         string[2][] info;
         auto jobid = environment.get(EnvironmentKey.PBS_JOBID, "Unknown");
