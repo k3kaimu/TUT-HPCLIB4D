@@ -109,6 +109,7 @@ class JobEnvironment
     bool useArrayJob = true;    /// ArrayJobにするかどうか
     string scriptPath;          /// スクリプトファイルの保存場所, nullならパイプでqsubにジョブを送る
     string queueName;           /// nullのとき，自動でclusters[cluster].queueNameに設定される
+    string jobName;             /// ジョブの名前
     string dependentJob;        /// 依存しているジョブのID
     string dependencySetting = DependencySetting.exit;   /// 依存しているジョブがどの状況でこのジョブを実行するか
     string[] unloadModules;     /// module unloadで破棄されるモジュール
@@ -153,6 +154,7 @@ class JobEnvironment
         getopt(newargs,
             std.getopt.config.passThrough,
             "th:queue|th:q", &queueName,
+            "th:name", &jobName,
             "th:after|th:a", &dependentJob,
             "th:ppn|th:p", &ppn,
             "th:nodes|th:n", &nodes,
@@ -363,6 +365,10 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     }
 
     .put(orange, '\n');
+
+    if(jenv.jobName !is null) {
+        orange.formattedWrite("#%s -N %s\n", headerID, jenv.jobName);
+    }
 
     // walltime
     if(headerID == "PBS") {
