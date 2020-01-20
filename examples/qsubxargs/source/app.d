@@ -7,8 +7,10 @@ import std.exception;
 import std.file;
 import std.format;
 import std.getopt;
+import std.parallelism;
 import std.path;
 import std.process;
+import std.range;
 import std.stdio;
 import std.string;
 
@@ -17,7 +19,8 @@ import tuthpc.taskqueue;
 
 bool flagDryRun = false;        // ジョブを投入せずに，コマンドのリストを出力する
 bool flagVerbose = false;       // 冗長な出力を含む
-bool flagHelp = false;
+bool flagHelp = false;          // ヘルプ表示
+int numParallelWrite = 1;      // 並列で書き込む
 
 
 string[] args_tuthpclib_options;
@@ -33,6 +36,9 @@ void main(string[] args)
     env.isEnabledUserCheckBeforePush = false;       // ユーザーに全てを委ねる
 
     parseArgs(args);
+
+    if(numParallelWrite != 0)
+        defaultPoolThreads(numParallelWrite - 1);
 
     if(flagHelp) {
         printUsage();
@@ -50,9 +56,12 @@ void main(string[] args)
 
     env.logdir = env.saveOrLoadENV("TUTHPCLIB_QSUBARRAY_LOGDIR", env.logdir);
 
+    immutable scriptDir = buildPath(env.logdir, "scripts");
 
     // logdir/scripts 以下にシェルスクリプトを保存する
     if(thisProcessType() == ChildProcessType.SUBMITTER) {
+        mkdirRecurse(scriptDir);
+
         // コマンドのリストを作成
         string[] commands = makeCommandLines();
         if(flagDryRun) {
@@ -60,15 +69,11 @@ void main(string[] args)
             return;
         }
 
-        immutable scriptDir = buildPath(env.logdir, "scripts");
-        mkdirRecurse(scriptDir);
-
-        string[] scriptList;
-        foreach(index, cmd; commands) {
-            string scriptPath = buildPath(scriptDir, "%d.sh".format(index));
-            scriptList ~= scriptPath;
+        string[] scriptList = iota(commands.length).map!(a => format!"%d.sh"(a)).array();
+        foreach(elem; zip(scriptList, commands).parallel) {
+            string scriptPath = buildPath(scriptDir, elem[0]);
             File script = File(scriptPath, "w");
-            script.write(cmd);
+            script.write(elem[1]);
         }
 
         File scriptListFile = File(buildPath(env.logdir, "scriptlist.txt"), "w");
@@ -80,21 +85,25 @@ void main(string[] args)
     File scriptListFile = File(buildPath(env.logdir, "scriptlist.txt"));
     auto taskList = new MultiTaskList!void();
     foreach(scriptPath; scriptListFile.byLine.map!chomp.map!dup) {
-        taskList.append(&runScript, scriptPath);
+        taskList.append(&runScript, buildPath(scriptDir, scriptPath));
     }
 
     // ジョブの投入 or 実行
-    taskList.run(env);
+    tuthpc.taskqueue.run(taskList, env);
 }
 
 
 void parseArgs(string[] args)
 {
     string[] dummy_args = args.dup;
+    if(EnvironmentKey.DEFAULT_ARGS in environment)
+        dummy_args ~= environment[EnvironmentKey.DEFAULT_ARGS].split(",");
+
     getopt(dummy_args,
         std.getopt.config.passThrough,
         "th:dryrun", &flagDryRun,
         "th:verbose", &flagVerbose,
+        "th:parallelwrite", &numParallelWrite,
         "help|h", &flagHelp);
 
     // プログラム名を無視

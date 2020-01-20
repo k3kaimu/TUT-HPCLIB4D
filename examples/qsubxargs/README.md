@@ -34,7 +34,7 @@ $ chmod +x qsubxargs
 export TUTHPC_CLUSTER_NAME="TUTX"
 export TUTHPC_QSUB_ARGS='-v SINGULARITY_IMAGE=<Image name>'
 export TUTHPC_EXPORT_ENVS='USER'
-export TUTHPC_DEFAULT_ARGS='--th:m=100'
+export TUTHPC_DEFAULT_ARGS='--th:g=15,--th:m=100,--th:pmem=6'
 export TUTHPC_STARTUP_SCRIPT='source ~/.bashrc'
 ```
 
@@ -42,10 +42,12 @@ export TUTHPC_STARTUP_SCRIPT='source ~/.bashrc'
 
 `qsubxargs`実行時の環境変数のうち，ジョブでも利用する環境変数のリストをカンマ区切りで書く
 
-+ `TUTHPC_DEFAULT_ARGS`
-
-`qsubxargs`のデフォルト引数を**カンマ区切り**で書く．
-たとえば，`--th:g=28,--th:m=4`を設定しておけば，`qsubxargs`の実行時に毎回 `--th:g=28 --th:m=4` を書かなくても良くなります．
++ `TUTHPC_DEFAULT_ARGS`  
+`qsubxargs`の`<tuthpc-lib options...>`のデフォルト引数を**カンマ区切り**で書く．
+たとえば，`--th:g=15,--th:m=100,--th:pmem=6`を設定しておけば，`qsubxargs`の実行時に毎回 `--th:g=15 --th:m=100 --th:pmem=6` を書かなくても良くなります．
+  - `--th:g=15`は，アレイジョブの各ジョブが15個のコマンドを並列で実行することを意味します．
+  - `--th:m=100`は，アレイジョブのジョブ数を最大10に制限します．
+  - `--th:pmem=6`は，1CPUコアあたりの要求するメモリ量（GB単位）です．
 
 
 + `TUTHPC_STARTUP_SCRIPT`
@@ -64,10 +66,28 @@ export TUTHPC_STARTUP_SCRIPT='source ~/.bashrc'
 qsubxargs --th:g=20 --th:m=100 <xargs options...> -- <commands...>
 ```
 
++ 1コマンドが複数のスレッドを必要とするとき
+
+OpenMPで書かれたプログラムなど，マルチスレッドプログラムをqsubxargsで投げる場合，1コマンドあたりのスレッド数を`--th:p=<Thread>`を指定します．
+
+以下の場合，1コマンドは4スレッド使うため，5コマンドで20CPU確保するジョブを一つ形成します．
+また，アレイジョブのサイズは100に制限されます．
+
+```sh
+qsubxargs --th:p=4 --th:g=5 --th:m=100 <xargs options...> -- <commands...>
+```
 
 + `--th:dryrun`
 
 このオプションを指定した場合，ジョブの投入は行わずに実際に実行されるコマンドのリストを出力して終了します．
+
+
++ 数千個以上のコマンドを発行するとき（`--th:parallelwrite`）  
+数千個以上のコマンドをqsubxargsでアレイジョブとして投入する場合，ディスクアクセスに律速しジョブの生成に時間がかかります．
+その場合，次の2点を行うとジョブ生成の時間を短縮できます．
+  + 計算ノードにインタラクティブジョブで入り，qsubxargsコマンドを実行する
+  + `--th:parallelwrite=0` を付ける（最大限並列化してディスクに書き込む）
+
 
 + xargsの`-P`や`-t`, `-p`などのオプションについて
 
