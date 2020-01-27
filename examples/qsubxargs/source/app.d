@@ -140,16 +140,16 @@ string[] makeCommandLines()
     if(flagNoXargs) {
         return stdin.byLine.map!chomp.map!idup.array();
     } else {
-        string[] program = ["xargs"] ~ args_xargs_options ~ ["echo"] ~ args_commands;
+    string[] program = ["xargs"] ~ args_xargs_options ~ ["echo"] ~ args_commands;
 
-        auto stdoutPipe = pipe();
-        auto xargsPid = spawnProcess(program, stdin, stdoutPipe.writeEnd, stderr);
-        scope(failure) kill(xargsPid);
-        scope(success) wait(xargsPid);
+    auto stdoutPipe = pipe();
+    auto xargsPid = spawnProcess(program, stdin, stdoutPipe.writeEnd, stderr);
+    scope(failure) kill(xargsPid);
+    scope(success) wait(xargsPid);
 
-        // xargs ... echo ... の出力の各行を配列にする
-        return stdoutPipe.readEnd.byLine.map!chomp.map!idup.array();
-    }
+    // xargs ... echo ... の出力の各行を配列にする
+    return stdoutPipe.readEnd.byLine.map!chomp.map!idup.array();
+}
 }
 
 
