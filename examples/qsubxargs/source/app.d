@@ -60,14 +60,14 @@ void main(string[] args)
 
     // logdir/scripts 以下にシェルスクリプトを保存する
     if(thisProcessType() == ChildProcessType.SUBMITTER) {
-        mkdirRecurse(scriptDir);
-
         // コマンドのリストを作成
         string[] commands = makeCommandLines();
         if(flagDryRun) {
             writefln("%-(%s\n%)", commands);
             return;
         }
+
+        mkdirRecurse(scriptDir);
 
         string[] scriptList = iota(commands.length).map!(a => format!"%d.sh"(a)).array();
         foreach(elem; zip(scriptList, commands).parallel) {
