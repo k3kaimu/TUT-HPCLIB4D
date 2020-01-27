@@ -95,6 +95,10 @@ qsubxargs --th:p=4 --th:g=5 --th:m=100 <xargs options...> -- <commands...>
 qsubxargsでは，xargsをコマンドの生成のみに利用しており，これらのオプションはその妨げになる可能性があります．
 
 
++ `--th:noxargs`
+xargsを使わず，標準入力を1行ごとにコマンドとして解釈します．
+
+
 ## ビルド方法
 
 ```sh
