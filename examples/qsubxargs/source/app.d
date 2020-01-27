@@ -20,7 +20,8 @@ import tuthpc.taskqueue;
 bool flagDryRun = false;        // ジョブを投入せずに，コマンドのリストを出力する
 bool flagVerbose = false;       // 冗長な出力を含む
 bool flagHelp = false;          // ヘルプ表示
-int numParallelWrite = 1;      // 並列で書き込む
+bool flagNoXargs = false;       // xargsを使用せずに入力を1行ずつ処理します
+int numParallelWrite = 1;       // 並列で書き込む
 
 
 string[] args_tuthpclib_options;
@@ -103,6 +104,7 @@ void parseArgs(string[] args)
         std.getopt.config.passThrough,
         "th:dryrun", &flagDryRun,
         "th:verbose", &flagVerbose,
+        "th:noxargs", &flagNoXargs,
         "th:parallelwrite", &numParallelWrite,
         "help|h", &flagHelp);
 
@@ -135,15 +137,19 @@ void parseArgs(string[] args)
 
 string[] makeCommandLines()
 {
-    string[] program = ["xargs"] ~ args_xargs_options ~ ["echo"] ~ args_commands;
+    if(flagNoXargs) {
+        return stdin.byLine.map!chomp.map!idup.array();
+    } else {
+        string[] program = ["xargs"] ~ args_xargs_options ~ ["echo"] ~ args_commands;
 
-    auto stdoutPipe = pipe();
-    auto xargsPid = spawnProcess(program, stdin, stdoutPipe.writeEnd, stderr);
-    scope(failure) kill(xargsPid);
-    scope(success) wait(xargsPid);
+        auto stdoutPipe = pipe();
+        auto xargsPid = spawnProcess(program, stdin, stdoutPipe.writeEnd, stderr);
+        scope(failure) kill(xargsPid);
+        scope(success) wait(xargsPid);
 
-    // xargs ... echo ... の出力の各行を配列にする
-    return stdoutPipe.readEnd.byLine.map!chomp.map!idup.array();
+        // xargs ... echo ... の出力の各行を配列にする
+        return stdoutPipe.readEnd.byLine.map!chomp.map!idup.array();
+    }
 }
 
 
