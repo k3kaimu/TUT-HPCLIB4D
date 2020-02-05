@@ -32,9 +32,10 @@ string[] args_commands;
 void main(string[] args)
 {
     auto env = defaultJobEnvironment;
-    env.isEnabledRenameExeFile = false;             // この実行ファイルをコピーしない
-    env.isEnabledQueueOverflowProtection = false;   // ユーザーに全てを委ねる
-    env.isEnabledUserCheckBeforePush = false;       // ユーザーに全てを委ねる
+    env.isEnabledRenameExeFile = false;                     // この実行ファイルをコピーしない
+    env.isEnabledQueueOverflowProtection = false;           // ユーザーに全てを委ねる
+    env.isEnabledUserCheckBeforePush = false;               // ユーザーに全てを委ねる
+    env.totalProcessNum = typeof(env.totalProcessNum).max;  // ユーザーに全てを委ねる
 
     parseArgs(args);
 
