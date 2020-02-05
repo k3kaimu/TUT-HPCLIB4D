@@ -14,6 +14,7 @@ interface ClusterInfo
     uint maxNode();
     uint maxPPN();
     uint maxMemGB();
+    uint maxArraySize();
     string defaultQueueName();
 
     string jobID();
@@ -57,6 +58,7 @@ class TUTWInfo : ClusterInfo
     uint maxNode() { return 30; }
     uint maxPPN() { return 20; }
     uint maxMemGB() { return 100; }
+    uint maxArraySize() { return 100; }
     string defaultQueueName() { return "wLrchq"; }
 
     string jobID()
@@ -94,6 +96,7 @@ class TUTXInfo : ClusterInfo
     uint maxNode() { return 14; }
     uint maxPPN() { return 28; }
     uint maxMemGB() { return 192; }
+    uint maxArraySize() { return 100; }
     string defaultQueueName() { return "wLrchq"; }
 
     string jobID()
@@ -136,6 +139,7 @@ class KyotoBInfo : ClusterInfo
             return 36;
     }
     uint maxMemGB() { return 100; }
+    uint maxArraySize() { return 8192; }
     string defaultQueueName() { return "gr10061b"; }
 
     string jobID()

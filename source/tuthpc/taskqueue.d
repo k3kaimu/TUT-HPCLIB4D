@@ -135,7 +135,7 @@ class JobEnvironment
     bool isEnabledEmailOnStart = false; /// 実行開始時にメールで通知するかどうか
     bool isEnabledEmailOnEnd = false;   /// 実行終了時にメールで通知するかどうか
     string[] emailAddrs;                /// メールを送りたい宛先
-    uint maxArraySize = 8192;           /// アレイジョブでの最大のサイズ
+    uint maxArraySize = 0;           /// アレイジョブでの最大のサイズ
     uint maxSlotSize = 0;               /// アレイジョブでの最大スロット数(-t 1-100%5の5のこと), 0は無設定（無制限）
     bool isEnabledQueueOverflowProtection = true;   /// キューの最大値(4096)以上ジョブを投入しないようにする
     bool isEnabledUserCheckBeforePush = true;       /// ジョブを投げる前にユーザーに確認を要求するかどうか
@@ -225,6 +225,13 @@ class JobEnvironment
 
         if(vmem <= 0 && mem > 0) vmem = mem;
         if(pvmem <= 0 && pmem > 0) pvmem = pmem;
+
+        if(maxArraySize == 0) {
+            if(cluster !is null)
+                maxArraySize = cluster.maxArraySize;
+            else
+                maxArraySize = 100;
+        }
 
         if(walltime == 0.seconds){
             switch(queueName){
