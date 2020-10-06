@@ -59,7 +59,10 @@ ChildProcessType thisProcessType()
             return type;
     }
 
-    return ChildProcessType.SUBMITTER;
+    if(ClusterInfo.currInstance is null)
+        return ChildProcessType.TASK_MANAGER;
+    else
+        return ChildProcessType.SUBMITTER;
 }
 
 
@@ -522,6 +525,7 @@ struct QueueOverflowProtector
     void analyze(size_t jobSize, size_t runId, string file, size_t line)
     {
         auto cinfo = ClusterInfo.currInstance;
+        enforce(cinfo !is null);
         enforce(thisProcessType() == ChildProcessType.SUBMITTER
             ||  thisProcessType() == ChildProcessType.ANALYZER);
 
@@ -771,7 +775,8 @@ if(isTaskList!TL)
     if(env.isShowMode)
         goto Lreturn;
 
-    if(thisProcessType() == ChildProcessType.SUBMITTER || thisProcessType() == ChildProcessType.ANALYZER)
+    if(cluster !is null
+    && (thisProcessType() == ChildProcessType.SUBMITTER || thisProcessType() == ChildProcessType.ANALYZER))
     {
         enforce(nowInRunOld == false);
         enforce(env.useArrayJob);
@@ -861,6 +866,7 @@ if(isTaskList!TL)
     else
     {
         import std.parallelism;
+        enforce(cluster is null);
 
         // Task実行プロセスかどうかチェック
         if(EnvironmentKey.RUN_ID in environment){
@@ -1095,20 +1101,22 @@ if(isInputRange!R)
 */
 string saveOrLoadENV(ref JobEnvironment env, string key, lazy string value)
 {
-    if(thisProcessType() == ChildProcessType.SUBMITTER
-    || thisProcessType() == ChildProcessType.ANALYZER)
+    auto cluster = ClusterInfo.currInstance;
+
+    bool setCond = false;
+    if(cluster is null)
+        setCond = (thisProcessType() == ChildProcessType.TASK_MANAGER);
+    else
+        setCond = (thisProcessType() == ChildProcessType.SUBMITTER || thisProcessType() == ChildProcessType.ANALYZER);
+
+    if(setCond)
     {
         auto v = value;
         env.envs[key] = v;
         return v;
     }
-    else if(thisProcessType() == ChildProcessType.TASK_MANAGER
-         || thisProcessType() == ChildProcessType.TASK_PROCESSOR)
-    {
+    else
         return environment[key];
-    } else {
-        return value;
-    }
 }
 
 
