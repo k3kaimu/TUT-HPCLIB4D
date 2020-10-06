@@ -455,7 +455,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
 
     // 起動時に走らせるスクリプト
     if(EnvironmentKey.STARTUP_SCRIPT in environment) {
-        orange.formattedWrite("%s\n", environment[EnvironmentKey.EXPORT_ENVS]);
+        orange.formattedWrite("%s\n", environment[EnvironmentKey.STARTUP_SCRIPT]);
     } else {
         orange.formattedWrite("%s\n", "if [ -f ~/.bashrc ] ; then source ~/.bashrc; fi");
     }
