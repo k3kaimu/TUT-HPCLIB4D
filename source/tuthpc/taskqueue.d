@@ -369,7 +369,7 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
         }else
             orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, reqcpus, reqcpus);
 
-        if(jenv.pmem != -1) orange.formattedWrite(":m=%sG", jenv.pmem);
+        if(jenv.mem != -1) orange.formattedWrite(":m=%sG", jenv.mem);
     } else {
         orange.formattedWrite("#PBS -l select=%s:ncpus=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
         if(jenv.mem != -1) orange.formattedWrite(":mem=%sgb", jenv.mem);
