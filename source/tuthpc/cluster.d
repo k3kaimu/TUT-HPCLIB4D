@@ -192,4 +192,13 @@ class KyotoBInfo : ClusterInfo
         immutable string envkey = "TUTHPC_ENABLE_HTT";
         return !(envkey !in environment);
     }
+
+
+    string userGroup() @property
+    {
+        import tuthpc.taskqueue: EnvironmentKey;
+
+        enforce(EnvironmentKey.KYOTO_USER_GROUP in environment , "cannot find environment variable '%s'".format(EnvironmentKey.KYOTO_USER_GROUP));
+        return environment[EnvironmentKey.KYOTO_USER_GROUP];
+    }
 }

@@ -38,6 +38,7 @@ enum EnvironmentKey : string
     EXPORT_ENVS = "TUTHPC_EXPORT_ENVS",
     DEFAULT_ARGS = "TUTHPC_DEFAULT_ARGS",
     STARTUP_SCRIPT = "TUTHPC_STARTUP_SCRIPT",
+    KYOTO_USER_GROUP = "TUTHPC_KYOTO_USER_GROUP",
 }
 
 
@@ -396,8 +397,8 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
 
     orange.formattedWrite("#%s -q %s\n", headerID, jenv.queueName);
 
-    if(cast(KyotoBInfo)cluster !is null) {
-        orange.formattedWrite("#%s -ug gr10061\n", headerID);
+    if(auto cinfo = cast(KyotoBInfo)cluster) {
+        orange.formattedWrite("#%s -ug %s\n", headerID, cinfo.userGroup);
     }
 
     // array job
