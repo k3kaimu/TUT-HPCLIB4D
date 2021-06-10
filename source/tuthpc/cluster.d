@@ -140,7 +140,9 @@ class KyotoBInfo : ClusterInfo
     }
     uint maxMemGB() { return 100; }
     uint maxArraySize() { return 8192; }
-    string defaultQueueName() { return "gr10061b"; }
+    string defaultQueueName() {
+        return userGroup ~ "b";
+    }
 
     string jobID()
     {
