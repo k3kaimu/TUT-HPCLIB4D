@@ -245,6 +245,9 @@ class JobEnvironment
                 case "gr10061b":
                     walltime = 335.hours;
                     break;
+                case "gr10513b":
+                    walltime = 335.hours;
+                    break;
                 default:
                     walltime = 1.hours;
             }
