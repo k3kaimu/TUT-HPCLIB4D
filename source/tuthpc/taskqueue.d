@@ -39,6 +39,7 @@ enum EnvironmentKey : string
     DEFAULT_ARGS = "TUTHPC_DEFAULT_ARGS",
     STARTUP_SCRIPT = "TUTHPC_STARTUP_SCRIPT",
     KYOTO_USER_GROUP = "TUTHPC_KYOTO_USER_GROUP",
+    OSAKA_USER_GROUP = "TUTHPC_OSAKA_USER_GROUP",
 }
 
 
@@ -249,13 +250,19 @@ class JobEnvironment
                     walltime = 335.hours;
                     break;
                 default:
-                    walltime = 1.hours;
+                    walltime = 24.hours;
             }
         }
 
         if(isEnabledEmailOnStart || isEnabledEmailOnEnd || isEnabledEmailOnError) {
             if(emailAddrs.length == 0 && EnvironmentKey.EMAIL_ADDR in environment) {
                 emailAddrs = [environment[EnvironmentKey.EMAIL_ADDR]];
+            }
+        }
+
+        if(auto squid = cast(OsakaSQUID)cluster) {
+            if(loadModules.length == 0) {
+                loadModules ~= "BaseCPU/2021";
             }
         }
 
@@ -374,6 +381,9 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
             orange.formattedWrite("#QSUB -A p=%s:t=%s:c=%s", jenv.nodes, reqcpus, reqcpus);
 
         if(jenv.mem != -1) orange.formattedWrite(":m=%sG", jenv.mem);
+    } else if(auto squidInfo = cast(OsakaSQUID)cluster) {
+        .put(orange, "#PBS -l cpunum_job=76");
+
     } else {
         orange.formattedWrite("#PBS -l select=%s:ncpus=%s", jenv.nodes, jenv.ppn * jenv.taskGroupSize);
         if(jenv.mem != -1) orange.formattedWrite(":mem=%sgb", jenv.mem);
@@ -389,7 +399,12 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
     if(headerID == "PBS") {
         int hrs, mins, secs;
         jenv.walltime.split!("hours", "minutes", "seconds")(hrs, mins, secs);
-        orange.formattedWrite("#PBS -l walltime=%d:%02d:%02d\n", hrs, mins, secs);
+
+        if(auto squidInfo = cast(OsakaSQUID)cluster) {
+            orange.formattedWrite("#PBS -l elapstim_req=%d:%02d:%02d\n", hrs, mins, secs);
+        } else {
+            orange.formattedWrite("#PBS -l walltime=%d:%02d:%02d\n", hrs, mins, secs);
+        }
     } else if(headerID == "QSUB") {
         int hrs, mins, secs;
         jenv.walltime.split!("hours", "minutes", "seconds")(hrs, mins, secs);
@@ -402,6 +417,8 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
 
     if(auto cinfo = cast(KyotoBInfo)cluster) {
         orange.formattedWrite("#%s -ug %s\n", headerID, cinfo.userGroup);
+    } else if(auto cinfo = cast(OsakaSQUID)cluster) {
+        orange.formattedWrite("#%s --group=%s\n", headerID, cinfo.userGroup);
     }
 
     // array job
@@ -414,6 +431,13 @@ void makeQueueScript(R)(ref R orange, ClusterInfo cluster, in JobEnvironment jen
                     orange.put('%');
                     orange.formattedWrite("%s", jenv.maxSlotSize);
                 }
+            }
+        } else if(auto cinfo = cast(OsakaSQUID)cluster) {
+            if(jobCount > 1) {
+                orange.formattedWrite("#PBS -t %s-%s\n", 0, jobCount-1);
+
+                if(jenv.maxSlotSize != 0)
+                    writeln("In this cluster, maxSlotSize is ignored.");
             }
         } else if(auto cinfo = cast(KyotoBInfo)cluster) {
             if(jobCount > 1) {
@@ -915,6 +939,10 @@ PushResult!T pushArrayJobToQueue(T)(string runId, size_t arrayJobSize, JobEnviro
         qsubcommands ~= format("depend=%s:%s", cast(string)env.dependencySetting, env.dependentJob);
     }
 
+    if(auto cinfo = cast(OsakaSQUID)cluster) {
+        qsubcommands ~= format("--group=%s", cinfo.userGroup);
+    }
+
     // if(EnvironmentKey.QSUB_ARGS in environment) {
     //     qsubcommands ~= environment[EnvironmentKey.QSUB_ARGS];
     // }
@@ -989,9 +1017,9 @@ template toTasks(alias fn)
     if(isInputRange!R)
     {
         static if(hasLength!R && isRandomAccessRange!R)
-            return range.map!(a => { return fn(a); });
+            return range.map!(a => (){ return fn(a); });
         else
-            return range.array().map!(a => { return fn(a); });
+            return range.array().map!(a => (){ return fn(a); });
     }
 }
 
