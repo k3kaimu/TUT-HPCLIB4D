@@ -164,6 +164,8 @@ if(isMessagePackable!T || is(T == JSONValue) || (isArray!T && is(ElementType!T =
 
         void flush()
         {
+            if(_isReadOnly) return;
+
             static if(isMessagePackable!T) {
                 File file = File(_filename, "w");
                 auto p = packer(file.lockingBinaryWriter, withFieldName);
