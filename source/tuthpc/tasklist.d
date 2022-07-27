@@ -65,7 +65,7 @@ void append(alias func, R, T...)(MultiTaskList!R list, T args)
     static if(is(R == void))
         list._tasks ~= delegate() { func(args); };
     else
-    list._tasks ~= delegate() { return func(args); };
+        list._tasks ~= delegate() { return func(args); };
 }
 
 
@@ -236,3 +236,357 @@ if(isUniformRNG!Rnd)
 
 
 
+struct ResumableTask(TL)
+if(isTaskList!TL)
+{
+    this(TL taskList, string filename, size_t saveThrottle)
+    {
+        _taskList = taskList;
+        _throttle = saveThrottle;
+        if(_throttle == 0)
+            _throttle = 1;
+
+      static if(is(ReturnTypeOfTaskList!TL == void))
+      {
+        _dones = OnDiskVariable!size_t(filename);
+      }
+      else
+      {
+        _rets = OnDiskVariable!(ReturnTypeOfTaskList!TL[])(filename);
+      }
+    }
+
+
+    size_t numOfTotal()
+    {
+        return _taskList.length;
+    }
+
+
+    bool isDone()
+    {
+      static if(is(ReturnTypeOfTaskList!TL == void))
+      {
+        return _dones.isNull ? _taskList.length == 0 : _dones.get == _taskList.length;
+      }
+      else
+      {
+        return _rets.isNull ? _taskList.length == 0 : _rets.get.length == _taskList.length;
+      }
+    }
+
+
+    size_t numOfDone()
+    {
+      static if(is(ReturnTypeOfTaskList!TL == void))
+      {
+        return _dones.isNull ? 0 : _dones.get;
+      }
+      else
+      {
+        return _rets.isNull ? 0 : _rets.get.length;
+      }
+    }
+
+
+    void opCall()
+    {
+        foreach(i; this.numOfDone .. _taskList.length) {
+            static if(is(ReturnTypeOfTaskList!TL == void))
+            {
+                _taskList[i]();
+                _dones = i + 1;
+                if(i % _throttle == 0)
+                    _dones.flush();
+            }
+            else
+            {
+                auto v = _taskList[i]();
+                _rets = _rets.get ~ v;
+                if(i % _throttle == 0)
+                    _rets.flush();
+            }
+        }
+    }
+
+
+  static if(!is(ReturnTypeOfTaskList!TL == void))
+  {
+    ReturnTypeOfTaskList!TL[] returns()
+    {
+        return _rets.isNull ? [] : _rets.get;
+    }
+  }
+
+
+  private:
+    TL _taskList;
+    ptrdiff_t _throttle;
+
+  static if(is(ReturnTypeOfTaskList!TL == void))
+    OnDiskVariable!size_t _dones;
+  else
+  {
+    OnDiskVariable!(ReturnTypeOfTaskList!TL[]) _rets;
+  }
+}
+
+
+auto toResumable(TL)(TL taskList, string filename, size_t throttle = size_t.max)
+{
+    return ResumableTask!TL(taskList, filename, throttle);
+}
+
+unittest
+{
+    import std.file;
+
+    string filename = "remove_this_file.bin";
+    scope(exit)
+        if(exists(filename))
+            std.file.remove(filename);
+
+    bool throwEx = true;
+    int a = 0, b = 0;
+
+    int delegate()[] tasks = [
+        (){ a = 1; b = 1; return 1; },
+        (){ a = 2; if(throwEx) throw new Exception(""); return 2;  },
+        (){ a = 3; return 3; }
+    ];
+
+    auto list = toResumable(tasks, filename);
+
+    assert(list.numOfTotal == 3);
+    assert(list.numOfDone == 0);
+    assertThrown(list());
+    assert(list.numOfDone == 1);
+    assert(a == 2 && b == 1);
+
+    a = 0;
+    b = 0;
+    throwEx = false;
+    assertNotThrown(list());
+    assert(list.numOfDone == 3);
+    assert(a == 3 && b == 0);
+    assert(list.returns == [1, 2, 3]);
+}
+
+unittest
+{
+    import std.file;
+
+    string filename = "remove_this_file.bin";
+    scope(exit)
+        if(exists(filename))
+            std.file.remove(filename);
+
+    bool throwEx = true;
+    int a = 0, b = 0;
+
+    int delegate()[] tasks = [
+        (){ a = 1; b = 1; return 1; },
+        (){ a = 2; if(throwEx) throw new Exception(""); return 2;  },
+        (){ a = 3; return 3; }
+    ];
+
+    auto list = toResumable(tasks, filename);
+
+    assert(list.numOfTotal == 3);
+    assert(list.numOfDone == 0);
+    assertThrown(list());
+    assert(list.numOfDone == 1);
+    assert(a == 2 && b == 1);
+    destroy(list);
+
+    auto list2 = toResumable(tasks, filename);
+    assert(list2.numOfDone == 1);
+
+    a = 0;
+    b = 0;
+    throwEx = false;
+    assertNotThrown(list2());
+    assert(list2.numOfDone == 3);
+    assert(a == 3 && b == 0);
+    assert(list2.returns == [1, 2, 3]);
+}
+
+
+
+struct PartialTaskList(TL, R)
+if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
+{
+    this(TL taskList, R indecies)
+    {
+        _taskList = taskList;
+        _indecies = indecies;
+    }
+
+
+    size_t length() { return _indecies.length; }
+
+
+    auto opIndex(size_t i) { return _taskList[_indecies[i]]; }
+
+
+  private:
+    TL _taskList;
+    R _indecies;
+}
+
+
+auto toPartial(TL, R)(TL taskList, R indecies)
+if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
+{
+    return PartialTaskList!(TL, R)(taskList, indecies);
+}
+
+
+
+struct SplitMergeResumableTasks(TL)
+{
+    this(TL taskList, size_t numOfDiv, string filename, size_t throttle)
+    {
+        foreach(i; 0 .. numOfDiv) {
+            size_t startIndex = taskList.length / numOfDiv * i;
+            size_t endIndex = taskList.length / numOfDiv * (i+1);
+            if(i == numOfDiv - 1)
+                endIndex = taskList.length;
+
+            _list ~= makePartialTask(taskList, startIndex, endIndex, "%s_%s".format(filename, i), throttle);
+        }
+    }
+
+
+    size_t length()
+    {
+        return _list.length;
+    }
+
+
+    auto opIndex(size_t i)
+    {
+        return _list[i];
+    }
+
+
+    auto returns()
+    {
+        ReturnTypeOfTaskList!TL[] rets;
+        foreach(i; 0 .. _list.length)
+            rets ~= _list[i].returns;
+
+        return rets;
+    }
+
+
+    MultiTaskList!void toMultiTaskList()
+    {
+        auto list = new MultiTaskList!void();
+        foreach(i; 0 .. _list.length) {
+            list.append!((i, ts) => ts[i]())(i, _list);
+        }
+
+        return list;
+    }
+
+
+  private:
+    ReturnType!makePartialTask[] _list;
+
+    static
+    auto makePartialTask(TL taskList, size_t i, size_t j, string filename, size_t throttle)
+    {
+        return toResumable(toPartial(taskList, iota(i, j)), filename, throttle);
+    }
+}
+
+
+auto toSplitMergeResumable(TL)(TL taskList, size_t nDivs, string filename, size_t throttle = size_t.max)
+{
+    return SplitMergeResumableTasks!TL(taskList, nDivs, filename, throttle);
+}
+
+unittest
+{
+    import std.file;
+
+    string filename = "remove_this_file";
+    auto rmtestfiles() {
+        foreach(i; 0 .. 2) {
+            auto fn = "%s_%s".format(filename, i);
+            if(exists(fn)) {
+                std.file.remove(fn);
+            }
+        }
+    }
+
+    rmtestfiles();
+
+    scope(exit) {
+        rmtestfiles();
+    }
+
+    bool throwEx = true;
+    int a = 0, b = 0;
+
+    int delegate()[] tasks = [
+        (){ a = 1; b = 1; return 1; },
+        (){ a = 2; if(throwEx) throw new Exception(""); return 2;  },
+        (){ a = 3; return 3; }
+    ];
+
+    auto list = toSplitMergeResumable(tasks, 2, filename);
+    assert(list.toMultiTaskList.length == 2);
+    assertNotThrown(list[0]());
+    assert(a == 1 && b == 1);
+    b = 0;
+    assertThrown(list[1]());
+    assert(a == 2);
+    list[0]._rets.flush();
+    list[1]._rets.flush();
+    destroy(list);
+
+    auto list2 = toSplitMergeResumable(tasks, 2, filename);
+
+    throwEx = false;
+    list2[1]();
+    assert(a == 3);
+    list2[0]._rets.flush();
+    list2[1]._rets.flush();
+    assert(list2.returns == [1, 2, 3]);
+    destroy(list2);
+}
+
+// unittest
+// {
+//     import std.file;
+
+//     string filename = "remove_this_file";
+//     scope(exit)
+//         foreach(i; 0 .. 2) {
+//             auto fn = "%s_%s".format(filename, i);
+//             if(exists(fn))
+//                 std.file.remove(fn);
+//         }
+
+//     bool throwEx = true;
+//     int a = 0, b = 0;
+
+//     int delegate()[] tasks = [
+//         (){ a = 1; b = 1; return 1; },
+//         (){ a = 2; if(throwEx) throw new Exception(""); return 2;  },
+//         (){ a = 3; return 3; }
+//     ];
+
+//     auto list = toSplitMergeResumable(tasks, 2, filename);
+//     assertNotThrown(list[0]());
+//     assert(a == 1 && b == 1);
+//     b = 0;
+//     assertThrown(list[1]());
+//     assert(a == 2);
+
+//     throwEx = false;
+//     list[1]();
+//     assert(a == 3);
+// }
