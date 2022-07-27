@@ -225,3 +225,14 @@ unittest
 
     assert(app.length == 1);
 }
+
+
+
+void taskShuffle(T, Rnd)(ref MultiTaskList!T taskList, ref Rnd rnd)
+if(isUniformRNG!Rnd)
+{
+    taskList._tasks.randomShuffle(rnd);
+}
+
+
+
