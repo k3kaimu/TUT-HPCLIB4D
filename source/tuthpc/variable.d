@@ -4,9 +4,11 @@ import msgpack;
 import std.algorithm : move;
 import std.file;
 import std.format;
+import std.json;
 import std.range;
 import std.stdio : File;
 import std.typecons;
+import std.traits;
 
 
 private
@@ -20,18 +22,40 @@ unittest
     static assert(isMessagePackable!int);
 }
 
+private
+T getFromJSONValue(T)(ref JSONValue v)
+{
+    static if(is(T == JSONValue))
+        return v;
+    else
+        return v.get!T;
+}
+
+private
+enum bool isJSONable(T) = is(typeof((T t){
+    JSONValue v = JSONValue(t);
+    t = v.getFromJSONValue!T();
+}));
+
+unittest
+{
+    static assert(isJSONable!int);
+    static assert(isJSONable!JSONValue);
+    static assert(isJSONable!(JSONValue[]));
+}
+
 
 
 /**
 ディスク上に変数の内容を書き出し保存します．
 また，保存された内容を読み出せます．
 
-書き出しや読み出しのためのシリアライゼーションとしてmsgpackを利用しています．
+書き出しや読み出しのためのシリアライゼーションとしてmsgpackかJSONを利用しています．
 ファイルからの読み出しはインスタンス作成時のみ実行されます．
 また，ファイルへの書き出しはインスタンスの破棄時のみ実行されます．
 */
 struct OnDiskVariable(T, Flag!"withFieldName" withFieldName = Yes.withFieldName)
-if(isMessagePackable!T)
+if(isMessagePackable!T || is(T == JSONValue) || (isArray!T && is(ElementType!T == JSONValue)))
 {
     /**
     保存する先のファイル名を指定し，インスタンスを作成します．
@@ -123,16 +147,16 @@ if(isMessagePackable!T)
 
         void fetch()
         {
-            import std.experimental.allocator.mallocator;
-            auto alloc = Mallocator.instance;
-            
-            File file = File(_filename, "r");
-            if(file.size == 0) return;
-            auto buf = cast(ubyte[])alloc.allocate(file.size);
-            scope(exit) alloc.deallocate(buf);
+            auto buf = std.file.read(_filename);
 
-            file.rawRead(buf);
-            msgpack.unpack!withFieldName(buf, _value);
+            static if(isMessagePackable!T) {
+                msgpack.unpack!withFieldName(cast(ubyte[])buf, _value);
+            } else static if(isJSONable!T) {
+                msgpack.Value mv = msgpack.unpack(cast(ubyte[])buf);
+                JSONValue jv = msgpack.toJSONValue(mv);
+                _value = jv.getFromJSONValue!T;
+            } else static assert(0);
+
             _isNull = false;
             _isModified = false;
         }
@@ -140,9 +164,16 @@ if(isMessagePackable!T)
 
         void flush()
         {
-            File file = File(_filename, "w");
-            auto p = packer(file.lockingBinaryWriter, withFieldName);
-            p.pack(_value);
+            static if(isMessagePackable!T) {
+                File file = File(_filename, "w");
+                auto p = packer(file.lockingBinaryWriter, withFieldName);
+                p.pack(_value);
+            } else static if(isJSONable!T) {
+                JSONValue jv = JSONValue(_value);
+                msgpack.Value mv = msgpack.fromJSONValue(jv);
+                std.file.write(_filename, pack(mv));
+            } else static assert(0);
+
             _isNull = false;
             _isModified = false;
         }
@@ -217,4 +248,28 @@ unittest
 
     va.fetch();
     assert(va.array == [1, 2, 3, 4]);
+}
+
+
+unittest
+{
+    string filename = "remove_this_file.bin";
+    scope(exit) {
+        assert(exists(filename));
+        std.file.remove(filename);
+    }
+
+    auto va = OnDiskVariable!JSONValue(filename);
+    va = JSONValue(1);
+
+    assert(!exists(filename));
+    va.flush();
+    assert(exists(filename));
+
+    auto vb = OnDiskVariable!JSONValue(filename);
+    vb = JSONValue(2);
+    vb.flush();
+
+    va.fetch();
+    assert(va.get.get!int == 2);
 }
