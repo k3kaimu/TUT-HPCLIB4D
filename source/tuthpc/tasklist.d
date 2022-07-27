@@ -1,5 +1,13 @@
 module tuthpc.tasklist;
 
+import std.exception;
+import std.format;
+import std.random;
+import std.range;
+import std.traits;
+
+
+import tuthpc.variable;
 
 enum bool isTaskList(TL) = is(typeof((TL taskList){
     foreach(i; 0 .. taskList.length){
@@ -11,7 +19,7 @@ enum bool isTaskList(TL) = is(typeof((TL taskList){
 alias ReturnTypeOfTaskList(TL) = typeof(TL.init[0]());
 
 
-final class MultiTaskList(T = void)
+final class MultiTaskList(T)
 {
     this() {}
 
@@ -54,16 +62,19 @@ void append(R, F, T...)(MultiTaskList!R list, F func, T args)
 
 void append(alias func, R, T...)(MultiTaskList!R list, T args)
 {
+    static if(is(R == void))
+        list._tasks ~= delegate() { func(args); };
+    else
     list._tasks ~= delegate() { return func(args); };
 }
 
 
 unittest
 {
-    static assert(isTaskList!MultiTaskList);
+    static assert(isTaskList!(MultiTaskList!void));
 
     int a = -1;
-    auto taskList = new MultiTaskList(
+    auto taskList = new MultiTaskList!void(
         [
             { a = 0; },
             { a = 1; },
@@ -98,7 +109,7 @@ unittest
     import std.range;
 
     int a;
-    auto taskList = new MultiTaskList();
+    auto taskList = new MultiTaskList!void();
     taskList ~= iota(5).map!(i => (){ a = i; });
 
     assert(taskList.length == 5);
