@@ -9,6 +9,12 @@ import std.traits;
 
 import tuthpc.variable;
 
+
+/**
+TaskListを定義します．
+本ライブラリにおけるTaskとは，`f()`のように引数なしで呼び出し可能な関数オブジェクトです．
+TaskListとは，長さ`tlist.length`を持ち，添字アクセス`tlist[i]`が可能であり，各要素がTaskとなる`tlist[i]()`ようなものです．
+*/
 enum bool isTaskList(TL) = is(typeof((TL taskList){
     foreach(i; 0 .. taskList.length){
         taskList[i]();
@@ -16,9 +22,16 @@ enum bool isTaskList(TL) = is(typeof((TL taskList){
 }));
 
 
+/**
+TaskListを構成する各タスクの戻り値の型
+*/
 alias ReturnTypeOfTaskList(TL) = typeof(TL.init[0]());
 
 
+/**
+最も簡単なTaskListの実装です．
+`T`型の戻り値を返すタスクのリストです．
+*/
 final class MultiTaskList(T)
 {
     this() {}
@@ -60,12 +73,16 @@ final class MultiTaskList(T)
 }
 
 
+/**
+MultiTaskListに，func(args)を実行するタスクを追加します．
+*/
 void append(R, F, T...)(MultiTaskList!R list, F func, T args)
 {
     list._tasks ~= delegate() { return func(args); };
 }
 
 
+/// ditto
 void append(alias func, R, T...)(MultiTaskList!R list, T args)
 {
     static if(is(R == void))
@@ -122,6 +139,11 @@ unittest
 }
 
 
+/**
+引数として`Args`を受け取り，戻り値として`R`を返す関数ポインタやデリゲートからTaskListを作ります．
+処理する関数は同一で与えるデータだけが異なる場合にMultiTaskListの代わりに利用します．
+MultiTaskListと比較して，大きなサイズにおいてはメモリ消費量の観点から有利になる可能性があります．
+*/
 final class TaskAppender(R, Args...)
 {
     this(R delegate(Args) dg)
@@ -196,6 +218,10 @@ unittest
 }
 
 
+/**
+TaskAppenderと同じく単一の関数ポインタやデリゲートからTaskListを生成します．
+TaskAppenderとの違いは，タスクに与えるデータである引数をユニークにする点です．
+*/
 final class UniqueTaskAppender(R, Args...)
 {
     this(R delegate(Args) dg)
@@ -308,6 +334,11 @@ unittest
 
 
 
+/**
+MultiTaskListのタスクの順番をランダムにシャッフルします．
+MultiTaskListの先頭のタスクの処理は軽く，後半は重いタスクが多いような，偏りのあるTaskListに適用することで，
+処理時間の偏りをなくすことができます．
+*/
 void taskShuffle(T, Rnd)(ref MultiTaskList!T taskList, ref Rnd rnd)
 if(isUniformRNG!Rnd)
 {
@@ -316,6 +347,10 @@ if(isUniformRNG!Rnd)
 
 
 
+/**
+途中で終了しても再開可能なタスクをTaskListから生成します．
+TaskListの要素をすべて実行している途中でシステムにより停止された場合にも，ディスク上に保存された途中までの結果を次回実行時に読み出すことで途中から再開できます．
+*/
 class ResumableTask(TL)
 if(isTaskList!TL)
 {
@@ -440,6 +475,7 @@ if(isTaskList!TL)
 }
 
 
+/// ditto
 auto toResumable(TL)(TL taskList, string filename, size_t throttle = size_t.max)
 {
     return new ResumableTask!TL(taskList, filename, throttle);
@@ -521,6 +557,9 @@ unittest
 
 
 
+/**
+あるTaskListの中から，インデックス列`indecies`によって指定されたタスクのみから構成されるTaskListを生成します．
+*/
 class PartialTaskList(TL, R)
 if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
 {
@@ -543,6 +582,7 @@ if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
 }
 
 
+/// ditto
 auto toPartial(TL, R)(TL taskList, R indecies)
 if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
 {
@@ -551,6 +591,9 @@ if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
 
 
 
+/**
+あるTaskListを`numOfDiv`個に分解し，それぞれでResumableTaskを作り，合計`numOfDiv`個のResumableTaskからなる新しいTaskListを作ります．
+*/
 class SplitMergeResumableTasks(TL)
 {
     this(TL taskList, size_t numOfDiv, string filename, size_t throttle)
@@ -617,6 +660,7 @@ class SplitMergeResumableTasks(TL)
 }
 
 
+/// ditto
 auto toSplitMergeResumable(TL)(TL taskList, size_t nDivs, string filename, size_t throttle = size_t.max)
 {
     return new SplitMergeResumableTasks!TL(taskList, nDivs, filename, throttle);
