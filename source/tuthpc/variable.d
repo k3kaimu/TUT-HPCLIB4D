@@ -67,8 +67,6 @@ if(isMessagePackable!T || is(T == JSONValue) || (isArray!T && is(ElementType!T =
         _payload._filename = filename;
         _payload._isReadOnly = isReadOnly;
         _payload._isNull = true;
-        if(exists(filename))
-            fetch();
     }
 
 
@@ -113,6 +111,14 @@ if(isMessagePackable!T || is(T == JSONValue) || (isArray!T && is(ElementType!T =
     }
 
 
+    void nullify()
+    {
+        _payload._value = T.init;
+        _payload._isModified = false;
+        _payload._isNull = true;
+    }
+
+
     void toString(OutputRange)(ref OutputRange writer) const
     {
         if(_payload._isNull)
@@ -136,17 +142,23 @@ if(isMessagePackable!T || is(T == JSONValue) || (isArray!T && is(ElementType!T =
 
         ~this()
         {
-            if(_filename !is null && !_isReadOnly && _isModified && !_isNull) {
-                this.flush();
-            }
+            // if(_filename !is null && !_isReadOnly && _isModified && !_isNull) {
+            //     this.flush();
+            // }
             _isModified = false;
             _filename = null;
             _isNull = true;
         }
 
 
-        void fetch()
+        void fetch(T init = T.init)
         {
+            if(!exists(_filename)) {
+                _value = init;
+                _isNull = false;
+                return;
+            }
+
             auto buf = std.file.read(_filename);
 
             static if(isMessagePackable!T) {
@@ -173,7 +185,9 @@ if(isMessagePackable!T || is(T == JSONValue) || (isArray!T && is(ElementType!T =
             } else static if(isJSONable!T) {
                 JSONValue jv = JSONValue(_value);
                 msgpack.Value mv = msgpack.fromJSONValue(jv);
-                std.file.write(_filename, pack(mv));
+                File file = File(_filename, "w");
+                auto p = packer(file.lockingBinaryWriter, withFieldName);
+                p.pack(mv);
             } else static assert(0);
 
             _isNull = false;
@@ -195,16 +209,19 @@ unittest
     assert(va == 1);
 
     va = 2;
-    assert(va == 2);
+    va.flush();
     destroy(va);
 
     auto vb = OnDiskVariable!int(filename, Yes.isReadOnly);
+    vb.fetch();
     assert(vb == 2);
 
     vb = 3;
+    vb.flush();
     destroy(vb);
 
     auto vc = OnDiskVariable!int(filename);
+    vc.fetch();
     assert(vc == 2);
 
     vc = 3;
@@ -213,12 +230,15 @@ unittest
     assert(vd == 3);
 
     auto ve = OnDiskVariable!int(filename, Yes.isReadOnly);
+    ve.fetch();
     assert(ve == 2);
     destroy(ve);
 
+    vd.flush();
     destroy(vd);
 
     auto vf = OnDiskVariable!int(filename, Yes.isReadOnly);
+    vf.fetch();
     assert(vf == 3);
 }
 
@@ -226,7 +246,7 @@ unittest
 {
     string filename = "remove_this_file.bin";
     scope(exit) {
-        assert(exists(filename));
+        // assert(exists(filename));
         std.file.remove(filename);
     }
 
@@ -245,6 +265,7 @@ unittest
     assert(exists(filename));
 
     auto vb = OnDiskVariable!MyData(filename);
+    vb.fetch();
     vb.array ~= 4;
     vb.flush();
 
@@ -269,6 +290,7 @@ unittest
     assert(exists(filename));
 
     auto vb = OnDiskVariable!JSONValue(filename);
+    vb.fetch();
     vb = JSONValue(2);
     vb.flush();
 

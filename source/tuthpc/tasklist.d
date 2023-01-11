@@ -49,6 +49,12 @@ final class MultiTaskList(T)
     }
 
 
+    void opOpAssign(string op : "~")(MultiTaskList!T other)
+    {
+        _tasks ~= other._tasks;
+    }
+
+
   private:
     T delegate()[] _tasks;
 }
@@ -113,6 +119,80 @@ unittest
     taskList ~= iota(5).map!(i => (){ a = i; });
 
     assert(taskList.length == 5);
+}
+
+
+final class TaskAppender(R, Args...)
+{
+    this(R delegate(Args) dg)
+    {
+        _dg = dg;
+    }
+
+
+    this(R function(Args) fp)
+    {
+        import std.functional : toDelegate;
+
+        _dg = toDelegate(fp);
+    }
+
+
+    void append(Args args)
+    {
+        _list ~= ArgsType(args);
+    }
+
+
+    alias put = append;
+
+
+    auto opIndex(size_t idx)
+    {
+        Caller dst = {_dg, _list[idx]};
+        return dst;
+    }
+
+
+    size_t length() const @property { return _list.length; }
+
+
+  private:
+    R delegate(Args) _dg;
+    ArgsType[] _list;
+
+    static struct ArgsType { Args args; }
+    static struct Caller
+    {
+        R delegate(Args) _dg;
+        ArgsType _args;
+
+        R opCall(){ return _dg(_args.args); }
+    }
+}
+
+
+auto taskAppender(R, Args...)(R delegate(Args) dg) { return new TaskAppender!(R, Args)(dg); }
+
+
+auto taskAppender(R, Args...)(R function(Args) fp) { return new TaskAppender!(R, Args)(fp); }
+
+unittest
+{
+    import std.range;
+
+    int[][int] arrAA;
+
+    auto app = taskAppender!void((int a){ arrAA[a] ~= a; });
+
+    std.range.put(app, iota(10).chain(iota(10)));
+    assert(app.length == 20);
+    foreach(i; 0 .. app.length)
+        app[i]();
+
+    assert(arrAA.length == 10);
+    foreach(k, e; arrAA)
+        assert(e.length == 2);
 }
 
 
@@ -236,13 +316,14 @@ if(isUniformRNG!Rnd)
 
 
 
-struct ResumableTask(TL)
+class ResumableTask(TL)
 if(isTaskList!TL)
 {
     this(TL taskList, string filename, size_t saveThrottle)
     {
         _taskList = taskList;
         _throttle = saveThrottle;
+        _isFetched = false;
         if(_throttle == 0)
             _throttle = 1;
 
@@ -265,33 +346,26 @@ if(isTaskList!TL)
 
     bool isDone()
     {
-      static if(is(ReturnTypeOfTaskList!TL == void))
-      {
-        return _dones.isNull ? _taskList.length == 0 : _dones.get == _taskList.length;
-      }
-      else
-      {
-        return _rets.isNull ? _taskList.length == 0 : _rets.get.length == _taskList.length;
-      }
+        return this.numOfDone == this.numOfTotal;
     }
 
 
     size_t numOfDone()
     {
-      static if(is(ReturnTypeOfTaskList!TL == void))
-      {
-        return _dones.isNull ? 0 : _dones.get;
-      }
-      else
-      {
-        return _rets.isNull ? 0 : _rets.get.length;
-      }
+        if(!_isFetched) this.fetch();
+
+        static if(is(ReturnTypeOfTaskList!TL == void))
+            return _dones.isNull ? 0 : _dones.get;
+        else
+            return _rets.isNull ? 0 : _rets.get.length;
     }
 
 
     void opCall()
     {
-        foreach(i; this.numOfDone .. _taskList.length) {
+        this.fetch();
+
+        foreach(i; this.numOfDone() .. _taskList.length) {
             static if(is(ReturnTypeOfTaskList!TL == void))
             {
                 _taskList[i]();
@@ -307,6 +381,38 @@ if(isTaskList!TL)
                     _rets.flush();
             }
         }
+
+        this.flush();
+    }
+
+
+    void fetch()
+    {
+        static if(is(ReturnTypeOfTaskList!TL == void))
+            _dones.fetch();
+        else
+            _rets.fetch();
+
+        _isFetched = true;
+    }
+
+
+    void flush()
+    {
+        static if(is(ReturnTypeOfTaskList!TL == void))
+            _dones.flush();
+        else
+            _rets.flush();
+    }
+
+
+    void nullify()
+    {
+        _isFetched = false;
+        static if(is(ReturnTypeOfTaskList!TL == void))
+            _dones.nullify();
+        else
+            _rets.nullify();
     }
 
 
@@ -314,6 +420,7 @@ if(isTaskList!TL)
   {
     ReturnTypeOfTaskList!TL[] returns()
     {
+        this.fetch();
         return _rets.isNull ? [] : _rets.get;
     }
   }
@@ -322,6 +429,7 @@ if(isTaskList!TL)
   private:
     TL _taskList;
     ptrdiff_t _throttle;
+    bool _isFetched;
 
   static if(is(ReturnTypeOfTaskList!TL == void))
     OnDiskVariable!size_t _dones;
@@ -334,7 +442,7 @@ if(isTaskList!TL)
 
 auto toResumable(TL)(TL taskList, string filename, size_t throttle = size_t.max)
 {
-    return ResumableTask!TL(taskList, filename, throttle);
+    return new ResumableTask!TL(taskList, filename, throttle);
 }
 
 unittest
@@ -413,7 +521,7 @@ unittest
 
 
 
-struct PartialTaskList(TL, R)
+class PartialTaskList(TL, R)
 if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
 {
     this(TL taskList, R indecies)
@@ -438,12 +546,12 @@ if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
 auto toPartial(TL, R)(TL taskList, R indecies)
 if(isTaskList!TL && isRandomAccessRange!R && hasLength!R)
 {
-    return PartialTaskList!(TL, R)(taskList, indecies);
+    return new PartialTaskList!(TL, R)(taskList, indecies);
 }
 
 
 
-struct SplitMergeResumableTasks(TL)
+class SplitMergeResumableTasks(TL)
 {
     this(TL taskList, size_t numOfDiv, string filename, size_t throttle)
     {
@@ -480,6 +588,13 @@ struct SplitMergeResumableTasks(TL)
     }
 
 
+    void nullify()
+    {
+        foreach(ref e; _list)
+            e.nullify();
+    }
+
+
     MultiTaskList!void toMultiTaskList()
     {
         auto list = new MultiTaskList!void();
@@ -504,7 +619,7 @@ struct SplitMergeResumableTasks(TL)
 
 auto toSplitMergeResumable(TL)(TL taskList, size_t nDivs, string filename, size_t throttle = size_t.max)
 {
-    return SplitMergeResumableTasks!TL(taskList, nDivs, filename, throttle);
+    return new SplitMergeResumableTasks!TL(taskList, nDivs, filename, throttle);
 }
 
 unittest
@@ -543,8 +658,6 @@ unittest
     b = 0;
     assertThrown(list[1]());
     assert(a == 2);
-    list[0]._rets.flush();
-    list[1]._rets.flush();
     destroy(list);
 
     auto list2 = toSplitMergeResumable(tasks, 2, filename);
@@ -552,8 +665,6 @@ unittest
     throwEx = false;
     list2[1]();
     assert(a == 3);
-    list2[0]._rets.flush();
-    list2[1]._rets.flush();
     assert(list2.returns == [1, 2, 3]);
     destroy(list2);
 }
